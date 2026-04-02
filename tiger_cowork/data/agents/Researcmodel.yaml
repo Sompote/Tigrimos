@@ -1,0 +1,357 @@
+system:
+  name: 'Model researchers '
+  orchestration_mode: hierarchical
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: Human User
+    role: human
+    persona: The end user who initiates the research request and provides the topic or research question.
+    responsibilities:
+      - Provide research topic
+      - Review final report
+      - Give feedback on deliverables
+  - id: research_orchestrator
+    name: Research Orchestrator
+    role: orchestrator
+    persona: >-
+      An experienced research coordinator who breaks down complex literature review tasks, assigns work to specialists,
+      tracks progress, and ensures high quality synthesis of academic findings.
+    responsibilities:
+      - Decompose research queries into subtasks
+      - Coordinate workflow between team members
+      - Monitor progress and resolve bottlenecks
+      - Synthesize inputs from all agents into coherent deliverables
+    bus:
+      enabled: true
+      topics:
+        - research_updates
+        - status_reports
+  - id: literature_researcher
+    name: Literature Researcher
+    role: researcher
+    persona: >-
+      A meticulous academic researcher skilled at finding, filtering, and summarizing scholarly articles, papers, and
+      books relevant to the given topic.
+    responsibilities:
+      - Perform comprehensive literature searches
+      - Identify key papers and authors
+      - Extract relevant findings and methodologies
+      - Provide structured summaries of sources
+    bus:
+      enabled: true
+      topics:
+        - research_updates
+        - found_sources
+  - id: coding_engineer_1
+    name: Model Simulation Engineer
+    role: worker
+    model: codex
+    persona: >-
+      You are an expert coding engineer specializing in model simulation. You have deep knowledge of numerical methods,
+      computational algorithms, and simulation frameworks. You write clean, efficient, and well-documented code that
+      accurately represents complex systems and processes.
+    responsibilities:
+      - Develop simulation code for mathematical and computational models
+      - Implement numerical algorithms and optimization techniques
+      - Debug and test simulation code for accuracy and performance
+      - Refactor and optimize existing simulation code for better efficiency
+      - Ensure code is scalable and maintainable for various simulation scenarios
+      - IMPORTANT: >-
+          When using scipy.optimize (differential_evolution, minimize, etc.), ALWAYS wrap objective functions in
+          try/except and return a large penalty (1e18) for NaN/Inf/exceptions. Use np.abs() for fractional exponents to
+          avoid complex numbers.
+  - id: coding_engineer_2
+    name: Simulation Engineer
+    role: worker
+    model: claude-code
+    persona: >-
+      You are a highly skilled model simulation engineer with deep expertise in mathematical modeling and computational
+      analysis. You specialize in setting up governing equations for physical and engineering systems and implementing
+      them efficiently in Python. Your strength lies in translating complex mathematical formulations into robust,
+      performant simulation code.
+    responsibilities:
+      - Design and implement numerical simulations using Python
+      - Set up and formulate governing equations for system modeling
+      - Develop analysis code for data processing and visualization
+      - Optimize simulation performance and numerical accuracy
+      - Validate simulation results against theoretical expectations
+      - IMPORTANT: >-
+          When using scipy.optimize (differential_evolution, minimize, etc.), ALWAYS wrap objective functions in
+          try/except and return a large penalty (1e18) for NaN/Inf/exceptions. Use np.abs() for fractional exponents to
+          avoid complex numbers.
+  - id: quality_checker
+    name: Quality Checker
+    role: checker
+    model: claude-code
+    persona: >-
+      A rigorous quality assurance specialist who validates code correctness, verifies research accuracy, and ensures
+      all outputs meet academic and technical standards.
+    responsibilities:
+      - Review and test code from engineers
+      - Validate accuracy of research summaries
+      - Check for gaps in literature coverage
+      - Ensure methodological soundness
+    bus:
+      enabled: true
+      topics:
+        - quality_feedback
+  - id: report_creator
+    name: Report Creator
+    role: reporter
+    persona: >-
+      An expert technical writer and academic communicator who transforms raw research and analysis into clear,
+      well-structured, publication-quality reports.
+    responsibilities:
+      - Synthesize findings from all team members
+      - Structure and format final reports
+      - Create executive summaries and visuals
+      - Ensure narrative coherence and citation accuracy
+    bus:
+      enabled: true
+  - id: agent_8
+    name: Python Model Optimizer
+    role: worker
+    model: claude-code
+    persona: >-
+      You are an expert in optimizing machine learning models in Python with deep knowledge of PyTorch, TensorFlow, and
+      various optimization techniques. You specialize in improving model performance, reducing memory footprint, and
+      accelerating training and inference times.
+    responsibilities:
+      - Analyze and optimize model architecture for better performance
+      - Implement techniques like quantization, pruning, and knowledge distillation
+      - Reduce memory usage and improve computational efficiency
+      - Profile code to identify bottlenecks and optimization opportunities
+      - Apply framework-specific optimizations for PyTorch and TensorFlow models
+      - IMPORTANT: >-
+          When using scipy.optimize (differential_evolution, minimize, etc.), ALWAYS wrap objective functions in
+          try/except and return a large penalty (1e18) for NaN/Inf/exceptions. Use np.abs() for fractional exponents to
+          avoid complex numbers.
+    bus:
+      enabled: true
+workflow:
+  sequence:
+    - step: 1
+      agent: research_orchestrator
+      action: Decompose research queries into subtasks
+      outputs_to:
+        - literature_researcher
+        - coding_engineer_1
+        - coding_engineer_2
+        - quality_checker
+        - report_creator
+        - agent_8
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - research_orchestrator
+          - literature_researcher
+          - coding_engineer_1
+          - coding_engineer_2
+          - quality_checker
+          - report_creator
+          - agent_8
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - research_orchestrator
+          - literature_researcher
+          - coding_engineer_1
+          - coding_engineer_2
+          - quality_checker
+          - report_creator
+          - agent_8
+        permitted_topics: []
+    - step: 2
+      agent: literature_researcher
+      action: Perform comprehensive literature searches
+      outputs_to:
+        - quality_checker
+        - report_creator
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - literature_researcher
+          - quality_checker
+          - report_creator
+        permitted_topics:
+          - found_sources
+          - found_sources
+    - step: 3
+      agent: quality_checker
+      action: Review and test code from engineers
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - quality_checker
+        permitted_topics:
+          - quality_feedback
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - quality_checker
+        permitted_topics:
+          - quality_feedback
+    - step: 4
+      agent: report_creator
+      action: Synthesize findings from all team members
+    - step: 5
+      agent: coding_engineer_1
+      action: Develop simulation code for mathematical and computational models
+      outputs_to:
+        - agent_8
+        - coding_engineer_2
+      communication:
+        enabled: true
+        protocols:
+          - queue
+          - tcp
+        participants:
+          - coding_engineer_1
+          - agent_8
+          - coding_engineer_2
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - coding_engineer_1
+          - agent_8
+          - coding_engineer_2
+        permitted_topics: []
+    - step: 6
+      agent: agent_8
+      action: Analyze and optimize model architecture for better performance
+      outputs_to:
+        - coding_engineer_2
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_8
+          - coding_engineer_2
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_8
+          - coding_engineer_2
+        permitted_topics: []
+    - step: 7
+      agent: coding_engineer_2
+      action: Design and implement numerical simulations using Python
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - coding_engineer_2
+        permitted_topics: []
+    - step: 8
+      agent: human
+      action: Provide research topic
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - human
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - human
+        permitted_topics: []
+connections:
+  - from: human
+    to: research_orchestrator
+    label: research_request
+    protocol: tcp
+  - from: research_orchestrator
+    to: literature_researcher
+    label: search_literature
+    protocol: tcp
+  - from: research_orchestrator
+    to: coding_engineer_1
+    label: implement_tools
+    protocol: tcp
+  - from: research_orchestrator
+    to: coding_engineer_2
+    label: implement_tools
+    protocol: tcp
+  - from: research_orchestrator
+    to: quality_checker
+    label: validate_work
+    protocol: tcp
+  - from: research_orchestrator
+    to: report_creator
+    label: generate_report
+    protocol: tcp
+  - from: literature_researcher
+    to: quality_checker
+    label: review_findings
+    protocol: queue
+    topics:
+      - found_sources
+  - from: coding_engineer_1
+    to: quality_checker
+    label: submit_code
+    protocol: queue
+  - from: coding_engineer_2
+    to: quality_checker
+    label: submit_code
+    protocol: queue
+  - from: quality_checker
+    to: research_orchestrator
+    label: quality_results
+    protocol: tcp
+    topics:
+      - quality_feedback
+  - from: literature_researcher
+    to: report_creator
+    label: provide_sources
+    protocol: queue
+    topics:
+      - found_sources
+  - from: coding_engineer_1
+    to: report_creator
+    label: provide_tools
+    protocol: queue
+  - from: coding_engineer_2
+    to: report_creator
+    label: provide_tools
+    protocol: queue
+  - from: research_orchestrator
+    to: agent_8
+    label: connection
+    protocol: tcp
+  - from: agent_8
+    to: coding_engineer_2
+    label: connection
+    protocol: tcp
+  - from: coding_engineer_1
+    to: agent_8
+    label: connection
+    protocol: tcp
+  - from: coding_engineer_1
+    to: coding_engineer_2
+    label: connection
+    protocol: tcp
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

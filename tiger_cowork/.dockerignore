@@ -1,0 +1,11 @@
+node_modules
+client/node_modules
+client/dist
+.env
+.git
+*.md
+.DS_Store
+data/settings.json
+data/chat_history.json
+data/tasks.json
+data/file_tokens.json

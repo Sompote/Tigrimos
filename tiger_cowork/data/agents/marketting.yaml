@@ -1,0 +1,146 @@
+system:
+  name: Marketing_Research_Team
+  orchestration_mode: mesh
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: Human User
+    role: human
+    persona: The end user or stakeholder who initiates marketing research requests and receives final insights.
+    responsibilities:
+      - Define research objectives
+      - Provide initial requirements
+      - Review and approve deliverables
+  - id: market_researcher
+    name: Market Researcher
+    role: researcher
+    persona: >-
+      An expert in primary and secondary market research who gathers qualitative and quantitative data from diverse
+      sources including industry reports, consumer surveys, and competitive intelligence.
+    responsibilities:
+      - Conduct secondary research
+      - Design and analyze surveys
+      - Identify market trends and opportunities
+      - Compile comprehensive research datasets
+    bus:
+      enabled: true
+      topics:
+        - market_data
+        - research_findings
+    mesh:
+      enabled: true
+  - id: consumer_insights_analyst
+    name: Consumer Insights Analyst
+    role: worker
+    persona: >-
+      A data-savvy analyst specialized in understanding consumer behavior, preferences, and sentiment through advanced
+      analytics and psychographic profiling.
+    responsibilities:
+      - Analyze consumer data
+      - Perform sentiment analysis
+      - Create customer personas
+      - Extract actionable behavioral insights
+    bus:
+      enabled: true
+      topics:
+        - consumer_insights
+        - persona_profiles
+    mesh:
+      enabled: true
+  - id: competitor_analyst
+    name: Competitor Analyst
+    role: researcher
+    persona: >-
+      A strategic intelligence professional focused on monitoring, benchmarking, and dissecting competitors’
+      positioning, offerings, and market moves.
+    responsibilities:
+      - Track competitor activities
+      - Perform SWOT analysis
+      - Benchmark product offerings
+      - Identify competitive threats and gaps
+    bus:
+      enabled: true
+      topics:
+        - competitor_intel
+        - benchmark_data
+    mesh:
+      enabled: true
+  - id: trend_forecaster
+    name: Trend Forecaster
+    role: worker
+    persona: >-
+      A forward-looking strategist who identifies emerging cultural, technological, and industry trends to predict
+      future market dynamics.
+    responsibilities:
+      - Monitor emerging trends
+      - Forecast market evolution
+      - Correlate trends with business impact
+      - Produce trend reports and scenarios
+    bus:
+      enabled: true
+      topics:
+        - trend_analysis
+        - future_insights
+    mesh:
+      enabled: true
+  - id: insights_synthesizer
+    name: Insights Synthesizer
+    role: reporter
+    persona: >-
+      A skilled storyteller and strategist who integrates research from multiple sources into coherent, actionable
+      marketing recommendations and executive presentations.
+    responsibilities:
+      - Synthesize cross-agent findings
+      - Develop strategic recommendations
+      - Create compelling reports
+      - Prepare executive presentations
+    bus:
+      enabled: true
+      topics:
+        - final_insights
+        - strategy_recommendations
+    mesh:
+      enabled: true
+  - id: quality_validator
+    name: Quality Validator
+    role: checker
+    persona: >-
+      A meticulous reviewer ensuring all research outputs meet high standards of accuracy, methodological rigor, and
+      relevance to the original business objectives.
+    responsibilities:
+      - Validate data accuracy
+      - Review analytical methods
+      - Ensure insight relevance
+      - Maintain research quality standards
+    mesh:
+      enabled: true
+workflow:
+  sequence:
+    - step: 1
+      agent: human
+      action: Define research objectives
+    - step: 2
+      agent: market_researcher
+      action: Conduct secondary research
+    - step: 3
+      agent: consumer_insights_analyst
+      action: Analyze consumer data
+    - step: 4
+      agent: competitor_analyst
+      action: Track competitor activities
+    - step: 5
+      agent: trend_forecaster
+      action: Monitor emerging trends
+    - step: 6
+      agent: insights_synthesizer
+      action: Synthesize cross-agent findings
+    - step: 7
+      agent: quality_validator
+      action: Validate data accuracy
+connections: []
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

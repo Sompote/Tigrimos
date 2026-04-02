@@ -1,0 +1,84 @@
+#cloud-config
+# TigrimOS VM provisioning — installs Node.js 20, Python 3, and Tiger Cowork
+
+hostname: tigris
+manage_etc_hosts: true
+
+users:
+  - name: tigris
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - git
+  - build-essential
+  - python3
+  - python3-pip
+  - python3-venv
+
+runcmd:
+  # Install Node.js 20
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+
+  # Create Python virtual environment
+  - python3 -m venv /opt/venv
+  - /opt/venv/bin/pip install --no-cache-dir numpy pillow matplotlib pandas scipy seaborn openpyxl python-docx
+
+  # Install clawhub CLI
+  - npm i -g clawhub tsx
+
+  # Setup Tiger Cowork from shared mount
+  - mkdir -p /app
+  - |
+    if mountpoint -q /mnt/tiger-cowork 2>/dev/null; then
+      cp -r /mnt/tiger-cowork/* /app/
+    fi
+  - cd /app && npm install --ignore-scripts --omit=dev 2>/dev/null || true
+  - cd /app/client && npm install 2>/dev/null || true
+  - cd /app/client && npx vite build 2>/dev/null || true
+
+  # Create systemd service for Tiger Cowork
+  - |
+    cat > /etc/systemd/system/tiger-cowork.service << 'UNIT'
+    [Unit]
+    Description=Tiger Cowork
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=tigris
+    WorkingDirectory=/app
+    Environment=NODE_ENV=production
+    Environment=PORT=3001
+    Environment=PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin
+    ExecStart=/usr/bin/npx tsx server/index.ts
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+    UNIT
+  - systemctl daemon-reload
+  - systemctl enable tiger-cowork
+  - systemctl start tiger-cowork
+
+  # Mount shared folders via VirtioFS
+  - mkdir -p /mnt/shared
+  - |
+    cat >> /etc/fstab << 'FSTAB'
+    # TigrimOS shared folders
+    tiger-cowork /mnt/tiger-cowork virtiofs defaults,nofail 0 0
+    FSTAB
+  - mount -a 2>/dev/null || true
+
+  # Signal provisioning complete
+  - touch /var/lib/tigris-provisioned
+
+final_message: "TigrimOS VM provisioning complete"

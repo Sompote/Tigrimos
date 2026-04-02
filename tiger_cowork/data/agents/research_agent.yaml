@@ -1,0 +1,229 @@
+system:
+  name: Web_Research_Swarm
+  orchestration_mode: hybrid
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: Human User
+    role: human
+    persona: The end user who submits research requests and receives final synthesized reports.
+    responsibilities:
+      - Provide research queries and objectives
+      - Review and give feedback on findings
+      - Approve final deliverables
+  - id: research_orchestrator
+    name: Research Orchestrator
+    role: orchestrator
+    persona: >-
+      A strategic coordinator that decomposes complex research requests into parallel subtasks and manages a team of
+      specialized web researchers inspired by Swarm-style collaboration.
+    responsibilities:
+      - Break down research goals into specific queries
+      - Assign tasks to specialized researchers
+      - Synthesize findings from multiple researchers
+      - Ensure comprehensive coverage and eliminate redundancy
+    bus:
+      enabled: true
+      topics:
+        - research_status
+        - findings_updates
+  - id: web_researcher_1
+    name: Primary Web Researcher
+    role: researcher
+    persona: >-
+      A highly skilled web researcher focused on finding high-quality, authoritative sources using advanced search
+      techniques and academic databases.
+    responsibilities:
+      - Execute deep web searches across multiple engines
+      - Identify and validate credible sources
+      - Extract structured data and key insights
+      - Provide source citations and relevance scores
+    bus:
+      enabled: true
+      topics:
+        - raw_findings
+        - source_updates
+    mesh:
+      enabled: true
+  - id: web_researcher_2
+    name: Exploratory Web Researcher
+    role: researcher
+    persona: >-
+      An exploratory researcher who excels at discovering unconventional sources, niche forums, and emerging trends
+      across the web.
+    responsibilities:
+      - Explore long-tail and unconventional search queries
+      - Mine social platforms, forums, and communities
+      - Track emerging discussions and new developments
+      - Surface diverse perspectives and contrarian views
+    bus:
+      enabled: true
+      topics:
+        - raw_findings
+        - source_updates
+    mesh:
+      enabled: true
+  - id: web_researcher_3
+    name: Data Web Researcher
+    role: researcher
+    persona: >-
+      A data-oriented researcher specialized in locating statistics, reports, datasets, and quantitative information
+      from government, industry, and research sources.
+    responsibilities:
+      - Locate statistical reports and datasets
+      - Extract and validate numerical data
+      - Find official publications and whitepapers
+      - Cross-reference data from multiple authoritative sources
+    bus:
+      enabled: true
+      topics:
+        - raw_findings
+        - source_updates
+    mesh:
+      enabled: true
+  - id: research_synthesizer
+    name: Research Synthesizer
+    role: reporter
+    persona: >-
+      An expert analyst who consolidates findings from multiple researchers into coherent, insightful narratives with
+      proper attribution.
+    responsibilities:
+      - Synthesize multi-source research findings
+      - Identify patterns and contradictions across sources
+      - Structure final reports with clear insights
+      - Ensure proper citation and source transparency
+    bus:
+      enabled: true
+      topics:
+        - final_report
+workflow:
+  sequence:
+    - step: 1
+      agent: research_orchestrator
+      action: Break down research goals into specific queries
+      outputs_to:
+        - web_researcher_1
+        - web_researcher_2
+        - web_researcher_3
+        - research_synthesizer
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - research_orchestrator
+          - web_researcher_1
+          - web_researcher_2
+          - web_researcher_3
+          - research_synthesizer
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - research_orchestrator
+          - web_researcher_1
+          - web_researcher_2
+          - web_researcher_3
+          - research_synthesizer
+        permitted_topics: []
+    - step: 2
+      agent: web_researcher_1
+      action: Execute deep web searches across multiple engines
+      outputs_to:
+        - research_synthesizer
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - web_researcher_1
+          - research_synthesizer
+        permitted_topics:
+          - raw_findings
+    - step: 3
+      agent: research_synthesizer
+      action: Synthesize multi-source research findings
+    - step: 4
+      agent: web_researcher_2
+      action: Explore long-tail and unconventional search queries
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - web_researcher_2
+        permitted_topics:
+          - raw_findings
+    - step: 5
+      agent: web_researcher_3
+      action: Locate statistical reports and datasets
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - web_researcher_3
+        permitted_topics:
+          - raw_findings
+    - step: 6
+      agent: human
+      action: Provide research queries and objectives
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - human
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - human
+        permitted_topics: []
+connections:
+  - from: human
+    to: research_orchestrator
+    label: research_request
+    protocol: tcp
+  - from: research_orchestrator
+    to: web_researcher_1
+    label: search_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: web_researcher_2
+    label: search_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: web_researcher_3
+    label: search_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: research_synthesizer
+    label: synthesis_task
+    protocol: tcp
+  - from: web_researcher_1
+    to: research_synthesizer
+    label: deliver_findings
+    protocol: queue
+    topics:
+      - raw_findings
+  - from: web_researcher_2
+    to: research_synthesizer
+    label: deliver_findings
+    protocol: queue
+    topics:
+      - raw_findings
+  - from: web_researcher_3
+    to: research_synthesizer
+    label: deliver_findings
+    protocol: queue
+    topics:
+      - raw_findings
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

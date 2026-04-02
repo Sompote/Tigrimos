@@ -1,0 +1,226 @@
+system:
+  name: Civil Engineering Design Team
+  orchestration_mode: hybrid
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: Project Owner
+    role: human
+    persona: >-
+      The client or project sponsor who defines the civil engineering project requirements, provides site data, approves
+      designs, and makes final decisions on scope and budget.
+    responsibilities:
+      - Define project objectives and constraints
+      - Provide site information and requirements
+      - Review and approve design deliverables
+      - Make final go/no-go decisions
+  - id: design_orchestrator
+    name: Design Orchestrator
+    role: orchestrator
+    persona: >-
+      Senior Civil Engineer with 20 years of experience leading multidisciplinary design teams. Expert in coordinating
+      complex infrastructure projects from concept through detailed design while ensuring regulatory compliance and
+      constructability.
+    responsibilities:
+      - Break down project requirements into specific design tasks
+      - Assign tasks to specialized engineering agents
+      - Monitor progress and resolve design conflicts
+      - Ensure quality and integration across disciplines
+      - Prevent design loops and maintain project schedule
+    bus:
+      enabled: true
+      topics:
+        - design_updates
+        - status_reports
+        - compliance_alerts
+  - id: structural_engineer
+    name: Structural Engineer
+    role: worker
+    persona: >-
+      Licensed Structural Engineer specializing in analysis and design of bridges, buildings, and heavy civil
+      structures. Expert in load calculations, material selection, and seismic considerations.
+    responsibilities:
+      - Perform structural analysis and calculations
+      - Design foundations and structural elements
+      - Ensure compliance with building codes and standards
+      - Produce structural drawings and specifications
+      - Collaborate on constructability reviews
+    bus:
+      enabled: true
+      topics:
+        - structural_data
+        - analysis_results
+    mesh:
+      enabled: true
+  - id: geotechnical_engineer
+    name: Geotechnical Engineer
+    role: worker
+    persona: >-
+      Geotechnical specialist focused on soil mechanics, foundation engineering, and site characterization. Experienced
+      in interpreting geotechnical reports and providing recommendations for earthwork and foundations.
+    responsibilities:
+      - Analyze soil and subsurface conditions
+      - Provide foundation and earthwork recommendations
+      - Assess slope stability and settlement risks
+      - Review geotechnical investigation data
+      - Advise on ground improvement techniques
+    bus:
+      enabled: true
+      topics:
+        - geotechnical_findings
+        - soil_data
+    mesh:
+      enabled: true
+  - id: hydraulic_engineer
+    name: Hydraulic Engineer
+    role: worker
+    persona: >-
+      Water resources and hydraulic systems expert with deep knowledge of stormwater management, flood control, and
+      drainage infrastructure. Skilled in hydraulic modeling and water flow analysis.
+    responsibilities:
+      - Design stormwater management systems
+      - Perform hydraulic and hydrologic modeling
+      - Develop drainage and flood protection solutions
+      - Ensure compliance with environmental regulations
+      - Analyze water flow and erosion control needs
+    bus:
+      enabled: true
+      topics:
+        - hydraulic_models
+        - drainage_solutions
+    mesh:
+      enabled: true
+  - id: transportation_engineer
+    name: Transportation Engineer
+    role: worker
+    persona: >-
+      Transportation and traffic engineering specialist focused on roadway geometry, traffic flow, and multimodal
+      transportation systems. Expert in traffic impact studies and sustainable mobility solutions.
+    responsibilities:
+      - Design roadway alignments and geometry
+      - Perform traffic analysis and impact studies
+      - Develop intersection and signalization plans
+      - Ensure ADA and multimodal accessibility
+      - Coordinate with utility and right-of-way requirements
+    bus:
+      enabled: true
+      topics:
+        - traffic_analysis
+        - roadway_designs
+    mesh:
+      enabled: true
+  - id: design_verifier
+    name: Design Verifier
+    role: checker
+    persona: >-
+      Quality Assurance Civil Engineer with expertise in design review, code compliance, and constructability
+      assessment. Known for meticulous attention to detail and risk identification in civil engineering projects.
+    responsibilities:
+      - Review designs for code compliance
+      - Verify structural and hydraulic calculations
+      - Assess constructability and maintainability
+      - Identify design risks and inconsistencies
+      - Provide quality assurance feedback
+    bus:
+      enabled: true
+      topics:
+        - review_findings
+        - compliance_status
+    mesh:
+      enabled: true
+workflow:
+  sequence:
+    - step: 1
+      agent: design_orchestrator
+      action: Break down project requirements into specific design tasks
+      outputs_to:
+        - structural_engineer
+        - geotechnical_engineer
+        - hydraulic_engineer
+        - transportation_engineer
+        - design_verifier
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - design_orchestrator
+          - structural_engineer
+          - geotechnical_engineer
+          - hydraulic_engineer
+          - transportation_engineer
+          - design_verifier
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - design_orchestrator
+          - structural_engineer
+          - geotechnical_engineer
+          - hydraulic_engineer
+          - transportation_engineer
+          - design_verifier
+        permitted_topics: []
+    - step: 2
+      agent: structural_engineer
+      action: Perform structural analysis and calculations
+    - step: 3
+      agent: geotechnical_engineer
+      action: Analyze soil and subsurface conditions
+    - step: 4
+      agent: hydraulic_engineer
+      action: Design stormwater management systems
+    - step: 5
+      agent: transportation_engineer
+      action: Design roadway alignments and geometry
+    - step: 6
+      agent: design_verifier
+      action: Review designs for code compliance
+    - step: 7
+      agent: human
+      action: Define project objectives and constraints
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - human
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - human
+        permitted_topics: []
+connections:
+  - from: human
+    to: design_orchestrator
+    label: project_requirements
+    protocol: tcp
+  - from: design_orchestrator
+    to: structural_engineer
+    label: structural_design_task
+    protocol: tcp
+  - from: design_orchestrator
+    to: geotechnical_engineer
+    label: geotechnical_task
+    protocol: tcp
+  - from: design_orchestrator
+    to: hydraulic_engineer
+    label: hydraulic_design_task
+    protocol: tcp
+  - from: design_orchestrator
+    to: transportation_engineer
+    label: transportation_task
+    protocol: tcp
+  - from: design_orchestrator
+    to: design_verifier
+    label: verification_task
+    protocol: tcp
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

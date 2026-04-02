@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "skills": {
+    "email-daily-summary": {
+      "version": "0.1.0",
+      "installedAt": 1772832382219
+    },
+    "duckduckgo-search": {
+      "version": "1.0.0",
+      "installedAt": 1772834992994
+    },
+    "word-docx": {
+      "version": "1.0.0",
+      "installedAt": 1772835249457
+    },
+    "multi-search-engine": {
+      "version": "2.0.1",
+      "installedAt": 1772835300509
+    },
+    "reddit": {
+      "version": "1.0.0",
+      "installedAt": 1772835547495
+    },
+    "web-pilot": {
+      "version": "1.0.0",
+      "installedAt": 1772857505202
+    },
+    "reddit-readonly": {
+      "version": "1.0.0",
+      "installedAt": 1772857768524
+    },
+    "openclaw-tavily-search": {
+      "version": "0.1.0",
+      "installedAt": 1772867278062
+    },
+    "liang-tavily-search": {
+      "version": "1.0.1",
+      "installedAt": 1772870438753
+    },
+    "tavily-search": {
+      "version": "1.0.0",
+      "installedAt": 1772878117923
+    },
+    "agent-browser": {
+      "version": "0.2.0",
+      "installedAt": 1772878778867
+    },
+    "nano-pdf": {
+      "version": "1.0.0",
+      "installedAt": 1772929726307
+    },
+    "drawing-analyzer": {
+      "version": "2.1.0",
+      "installedAt": 1773697414165
+    }
+  }
+}

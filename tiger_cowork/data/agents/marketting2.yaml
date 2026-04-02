@@ -1,0 +1,263 @@
+system:
+  name: Civil_Engineering_Marketing_Research_System
+  orchestration_mode: hierarchical
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: Human User
+    role: human
+    persona: Civil engineering department head or marketing coordinator requesting market research studies.
+    responsibilities:
+      - Provide research objectives
+      - Review final deliverables
+      - Approve project direction
+  - id: research_orchestrator
+    name: Research Orchestrator
+    role: orchestrator
+    persona: >-
+      Senior civil engineering marketing strategist who coordinates comprehensive market research initiatives for the
+      department.
+    responsibilities:
+      - Break down research objectives into tasks
+      - Assign work to specialized agents
+      - Monitor research quality and progress
+      - Synthesize findings from multiple sources
+    bus:
+      enabled: true
+      topics:
+        - research_updates
+        - market_insights
+  - id: market_researcher
+    name: Market Researcher
+    role: researcher
+    persona: >-
+      Data-driven analyst specialized in construction industry trends, competitor analysis, and infrastructure market
+      dynamics.
+    responsibilities:
+      - Conduct primary and secondary market research
+      - Analyze industry reports and statistics
+      - Identify emerging opportunities in civil engineering
+      - Track competitor positioning and strategies
+    bus:
+      enabled: true
+      topics:
+        - market_data
+        - industry_trends
+    mesh:
+      enabled: true
+  - id: client_analyst
+    name: Client & Stakeholder Analyst
+    role: worker
+    persona: >-
+      Expert in understanding client needs, government procurement patterns, and stakeholder requirements in the civil
+      engineering sector.
+    responsibilities:
+      - Map target client segments
+      - Analyze public sector tender patterns
+      - Evaluate client decision-making processes
+      - Identify key pain points and requirements
+    bus:
+      enabled: true
+      topics:
+        - client_insights
+    mesh:
+      enabled: true
+  - id: service_analyst
+    name: Service & Capability Analyst
+    role: worker
+    persona: >-
+      Specialist who evaluates the department's technical capabilities against market demands and identifies service
+      gaps or opportunities.
+    responsibilities:
+      - Assess current civil engineering service portfolio
+      - Identify service differentiation opportunities
+      - Evaluate technical strengths and weaknesses
+      - Recommend new service offerings
+    bus:
+      enabled: true
+      topics:
+        - capability_analysis
+  - id: trend_forecaster
+    name: Infrastructure Trend Forecaster
+    role: researcher
+    persona: >-
+      Forward-thinking analyst focused on technological advancements, sustainability trends, and future infrastructure
+      needs.
+    responsibilities:
+      - Forecast infrastructure development trends
+      - Analyze impact of new technologies on civil engineering
+      - Evaluate sustainability and green infrastructure demands
+      - Identify long-term market opportunities
+    bus:
+      enabled: true
+      topics:
+        - future_trends
+        - technology_insights
+    mesh:
+      enabled: true
+  - id: insights_reporter
+    name: Marketing Insights Reporter
+    role: reporter
+    persona: >-
+      Professional report writer who transforms complex market research into clear, actionable marketing strategies and
+      presentations.
+    responsibilities:
+      - Synthesize all research findings
+      - Create compelling marketing research reports
+      - Develop data visualizations and presentations
+      - Formulate strategic recommendations for the department
+workflow:
+  sequence:
+    - step: 1
+      agent: research_orchestrator
+      action: Break down research objectives into tasks
+      outputs_to:
+        - market_researcher
+        - client_analyst
+        - service_analyst
+        - trend_forecaster
+        - insights_reporter
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - research_orchestrator
+          - market_researcher
+          - client_analyst
+          - service_analyst
+          - trend_forecaster
+          - insights_reporter
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - research_orchestrator
+          - market_researcher
+          - client_analyst
+          - service_analyst
+          - trend_forecaster
+          - insights_reporter
+        permitted_topics: []
+    - step: 2
+      agent: market_researcher
+      action: Conduct primary and secondary market research
+      outputs_to:
+        - insights_reporter
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - market_researcher
+          - insights_reporter
+        permitted_topics:
+          - market_data
+    - step: 3
+      agent: insights_reporter
+      action: Synthesize all research findings
+    - step: 4
+      agent: client_analyst
+      action: Map target client segments
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - client_analyst
+        permitted_topics:
+          - client_insights
+    - step: 5
+      agent: service_analyst
+      action: Assess current civil engineering service portfolio
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - service_analyst
+        permitted_topics:
+          - capability_analysis
+    - step: 6
+      agent: trend_forecaster
+      action: Forecast infrastructure development trends
+      communication:
+        enabled: true
+        protocols:
+          - queue
+        participants:
+          - trend_forecaster
+        permitted_topics:
+          - future_trends
+    - step: 7
+      agent: human
+      action: Provide research objectives
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - human
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - human
+        permitted_topics: []
+connections:
+  - from: human
+    to: research_orchestrator
+    label: research_request
+    protocol: tcp
+  - from: research_orchestrator
+    to: market_researcher
+    label: market_research_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: client_analyst
+    label: client_analysis_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: service_analyst
+    label: service_analysis_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: trend_forecaster
+    label: trend_forecast_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: insights_reporter
+    label: report_generation_task
+    protocol: tcp
+  - from: market_researcher
+    to: insights_reporter
+    label: raw_findings
+    protocol: queue
+    topics:
+      - market_data
+  - from: client_analyst
+    to: insights_reporter
+    label: client_insights
+    protocol: queue
+    topics:
+      - client_insights
+  - from: service_analyst
+    to: insights_reporter
+    label: capability_findings
+    protocol: queue
+    topics:
+      - capability_analysis
+  - from: trend_forecaster
+    to: insights_reporter
+    label: trend_analysis
+    protocol: queue
+    topics:
+      - future_trends
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

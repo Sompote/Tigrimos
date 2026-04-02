@@ -1,0 +1,212 @@
+system:
+  name: Multi-Agent System
+  orchestration_mode: hierarchical
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: User
+    role: human
+  - id: agent_1
+    name: Project manager
+    role: orchestrator
+    persona: 'You are a specialized agent based on: Project manager for civil engineering design'
+    responsibilities:
+      - Analyze and process assigned tasks
+      - Report findings to the orchestrator
+      - Collaborate with peer agents when needed. The report is composed of  detail calculaiton and summary report.
+    bus:
+      enabled: true
+  - id: agent_2
+    name: structure engineer
+    role: worker
+    persona: 'You are a specialized agent based on: Design engineer, structural engineer'
+    responsibilities:
+      - Analyze and process assigned tasks
+      - Report findings to the orchestrator
+      - Collaborate with peer agents when needed. The design is conducted with python only.
+    bus:
+      enabled: true
+  - id: agent_3
+    name: checker
+    role: checker
+    persona: 'You are a specialized agent based on: Senior engineer, careful, and experienced.'
+    responsibilities:
+      - >-
+        You are a specialized agent based on: checking the calculation every step. Chek conformation with the design
+        code.
+    bus:
+      enabled: true
+  - id: agent_4
+    name: geotechnical engineer
+    role: worker
+    persona: You are a geotechnical engineer. Expert in underground investigations and foundation.
+    responsibilities:
+      - Analyze and process assigned tasks
+      - Report findings to the orchestrator
+      - >-
+        Collaborate with peer agents when needed. Subsurface evaluation and soil profile evaluation. Design calculations
+        must be using code.
+    bus:
+      enabled: true
+  - id: agent_5
+    name: report engineer
+    role: reporter
+    model: google/gemini-3-flash-preview
+    persona: 'You are a specialized agent based on: agetn that expert in make a report for engineer'
+    responsibilities:
+      - Analyze and process assigned tasks
+      - Report findings to the orchestrator
+      - >-
+        Collaborate with peer agents when needed.  The report includes all detailed calculations, every calculation is
+        needed,  and summary.
+    bus:
+      enabled: true
+workflow:
+  sequence:
+    - step: 1
+      agent: agent_1
+      action: Analyze and process assigned tasks
+      outputs_to:
+        - agent_2
+        - agent_4
+        - agent_3
+        - agent_5
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_1
+          - agent_2
+          - agent_4
+          - agent_3
+          - agent_5
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_1
+          - agent_2
+          - agent_4
+          - agent_3
+          - agent_5
+        permitted_topics: []
+    - step: 2
+      agent: agent_2
+      action: Analyze and process assigned tasks
+      outputs_to:
+        - agent_3
+        - agent_4
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+          - queue
+        participants:
+          - agent_2
+          - agent_3
+          - agent_4
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_2
+          - agent_3
+          - agent_4
+        permitted_topics: []
+    - step: 3
+      agent: agent_3
+      action: >-
+        You are a specialized agent based on: checking the calculation every step. Chek conformation with the design
+        code.
+      outputs_to:
+        - agent_4
+        - agent_5
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_3
+          - agent_4
+          - agent_5
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_3
+          - agent_4
+          - agent_5
+        permitted_topics: []
+    - step: 4
+      agent: agent_4
+      action: Analyze and process assigned tasks
+    - step: 5
+      agent: agent_5
+      action: Analyze and process assigned tasks
+    - step: 6
+      agent: human
+      action: Execute User tasks
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - human
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - human
+        permitted_topics: []
+connections:
+  - from: agent_1
+    to: agent_2
+    label: Analyze and process assigned t
+    protocol: tcp
+  - from: agent_1
+    to: agent_4
+    label: Analyze and process assigned t
+    protocol: tcp
+  - from: agent_2
+    to: agent_3
+    label: Analyze and process assigned t
+    protocol: tcp
+  - from: agent_2
+    to: agent_4
+    label: Analyze and process assigned t
+    protocol: queue
+  - from: agent_3
+    to: agent_4
+    label: You are a specialized agent ba
+    protocol: tcp
+  - from: agent_3
+    to: agent_5
+    label: connection
+    protocol: tcp
+  - from: agent_1
+    to: agent_3
+    label: connection
+    protocol: tcp
+  - from: agent_1
+    to: agent_5
+    label: connection
+    protocol: tcp
+  - from: human
+    to: agent_1
+    label: connection
+    protocol: tcp
+  - from: human
+    to: agent_5
+    label: connection
+    protocol: tcp
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Stop Tiger Cowork containers
+
+export PATH="/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.docker/bin:$PATH"
+
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+cd "$APP_DIR"
+
+if docker compose ps --status running 2>/dev/null | grep -q "tiger-cowork"; then
+  docker compose down
+  osascript -e 'display notification "Tiger Cowork has been stopped." with title "Tiger Cowork"'
+else
+  osascript -e 'display notification "Tiger Cowork is not running." with title "Tiger Cowork"'
+fi

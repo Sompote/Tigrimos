@@ -1,0 +1,218 @@
+system:
+  name: Marketing_Research_Grid
+  orchestration_mode: hybrid
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: human
+    name: Human User
+    role: human
+    persona: Marketing stakeholder or analyst who initiates research requests and provides strategic direction.
+    responsibilities:
+      - Define research objectives
+      - Provide domain context
+      - Review final deliverables
+  - id: research_orchestrator
+    name: Research Orchestrator
+    role: orchestrator
+    persona: >-
+      Senior marketing research strategist that decomposes high-level objectives into structured research plans and
+      coordinates specialized research agents.
+    responsibilities:
+      - Break down research requests into tasks
+      - Assign work to specialized agents
+      - Monitor progress and prevent loops
+      - Synthesize intermediate findings
+      - Ensure alignment with business goals
+    bus:
+      enabled: true
+      topics:
+        - research_status
+        - findings_updates
+  - id: market_researcher
+    name: Market Researcher
+    role: researcher
+    persona: >-
+      Deep-dive market intelligence specialist focused on gathering primary and secondary data from diverse sources
+      including industry reports, academic papers, and public datasets.
+    responsibilities:
+      - Conduct secondary research
+      - Identify market trends and dynamics
+      - Source credible data and statistics
+      - Perform competitive landscape analysis
+      - Document research sources and methodology
+    bus:
+      enabled: true
+      topics:
+        - market_data
+        - research_findings
+    mesh:
+      enabled: true
+  - id: consumer_insights_analyst
+    name: Consumer Insights Analyst
+    role: researcher
+    persona: >-
+      Consumer behavior and psychographics expert who analyzes customer needs, preferences, and emerging trends through
+      surveys, social listening, and behavioral data.
+    responsibilities:
+      - Analyze consumer behavior patterns
+      - Extract actionable customer insights
+      - Perform sentiment and perception analysis
+      - Map customer journey touchpoints
+      - Identify unmet needs and opportunities
+    bus:
+      enabled: true
+      topics:
+        - consumer_insights
+        - research_findings
+    mesh:
+      enabled: true
+  - id: data_analyst
+    name: Data Analyst
+    role: worker
+    persona: >-
+      Quantitative marketing analyst skilled in statistical analysis, data visualization, and turning raw market data
+      into meaningful metrics and forecasts.
+    responsibilities:
+      - Process and clean research data
+      - Perform statistical analysis
+      - Create data visualizations and dashboards
+      - Develop market sizing and forecasts
+      - Validate research hypotheses with data
+    bus:
+      enabled: true
+      topics:
+        - analysis_results
+        - data_insights
+    mesh:
+      enabled: true
+  - id: strategy_synthesizer
+    name: Strategy Synthesizer
+    role: reporter
+    persona: >-
+      Marketing strategist who integrates all research findings into cohesive strategic recommendations and compelling
+      narratives for stakeholders.
+    responsibilities:
+      - Synthesize cross-agent findings
+      - Develop strategic recommendations
+      - Create executive-level presentations
+      - Translate insights into business actions
+      - Ensure research delivers clear ROI
+    mesh:
+      enabled: true
+  - id: agent_7
+    name: Marketing Research Report Creator
+    role: reporter
+    persona: >-
+      You are an expert marketing research analyst and report writer with years of experience in market intelligence and
+      strategic insights. You excel at synthesizing complex data into clear, compelling narratives that drive business
+      decisions, with a keen eye for identifying trends, opportunities, and competitive advantages.
+    responsibilities:
+      - Conduct thorough market research and data analysis
+      - Synthesize findings into comprehensive reports
+      - Identify key market trends and insights
+      - Create visually appealing report structures
+      - Provide actionable strategic recommendations
+    bus:
+      enabled: true
+    mesh:
+      enabled: true
+workflow:
+  sequence:
+    - step: 1
+      agent: research_orchestrator
+      action: Break down research requests into tasks
+      outputs_to:
+        - market_researcher
+        - consumer_insights_analyst
+        - data_analyst
+        - strategy_synthesizer
+        - agent_7
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - research_orchestrator
+          - market_researcher
+          - consumer_insights_analyst
+          - data_analyst
+          - strategy_synthesizer
+          - agent_7
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - research_orchestrator
+          - market_researcher
+          - consumer_insights_analyst
+          - data_analyst
+          - strategy_synthesizer
+          - agent_7
+        permitted_topics: []
+    - step: 2
+      agent: market_researcher
+      action: Conduct secondary research
+    - step: 3
+      agent: consumer_insights_analyst
+      action: Analyze consumer behavior patterns
+    - step: 4
+      agent: data_analyst
+      action: Process and clean research data
+    - step: 5
+      agent: strategy_synthesizer
+      action: Synthesize cross-agent findings
+    - step: 6
+      agent: agent_7
+      action: Conduct thorough market research and data analysis
+    - step: 7
+      agent: human
+      action: Define research objectives
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - human
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - human
+        permitted_topics: []
+connections:
+  - from: human
+    to: research_orchestrator
+    label: research_request
+    protocol: tcp
+  - from: research_orchestrator
+    to: market_researcher
+    label: market_research_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: consumer_insights_analyst
+    label: consumer_insights_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: data_analyst
+    label: data_analysis_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: strategy_synthesizer
+    label: synthesis_task
+    protocol: tcp
+  - from: research_orchestrator
+    to: agent_7
+    label: connection
+    protocol: tcp
+  - from: human
+    to: agent_7
+    label: connection
+    protocol: tcp
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

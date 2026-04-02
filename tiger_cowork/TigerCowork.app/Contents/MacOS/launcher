@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Tiger Cowork — macOS App Launcher
+# Builds and runs Tiger Cowork via Docker, then opens in browser.
+
+set -e
+
+# macOS .app bundles have a minimal PATH — add common Docker locations
+export PATH="/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.docker/bin:$PATH"
+
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+URL="http://localhost:3001"
+LOG_FILE="/tmp/tiger-cowork-launcher.log"
+
+# --- Helper: show macOS dialog ---
+notify() {
+  osascript -e "display notification \"$1\" with title \"Tiger Cowork\""
+}
+
+alert() {
+  osascript -e "display dialog \"$1\" with title \"Tiger Cowork\" buttons {\"OK\"} default button \"OK\" with icon caution"
+}
+
+alert_info() {
+  osascript -e "display dialog \"$1\" with title \"Tiger Cowork\" buttons {\"OK\"} default button \"OK\" with icon note"
+}
+
+confirm() {
+  osascript -e "display dialog \"$1\" with title \"Tiger Cowork\" buttons {\"Cancel\", \"$2\"} default button \"$2\"" 2>/dev/null
+}
+
+progress_dialog() {
+  osascript -e "
+    display dialog \"$1\" with title \"Tiger Cowork\" buttons {} giving up after 1 with icon note
+  " 2>/dev/null &
+}
+
+# --- 1. Check Docker is installed ---
+if ! docker --version &>/dev/null 2>&1; then
+  alert "Docker is not installed.
+
+Please install Docker Desktop for Mac:
+https://www.docker.com/products/docker-desktop/
+
+Then try again."
+  open "https://www.docker.com/products/docker-desktop/"
+  exit 1
+fi
+
+# --- 2. Check Docker daemon is running, start if needed ---
+if ! docker info &>/dev/null 2>&1; then
+  notify "Starting Docker Desktop..."
+  open -a Docker
+  # Wait up to 90 seconds
+  TRIES=0
+  while ! docker info &>/dev/null 2>&1; do
+    sleep 3
+    TRIES=$((TRIES + 1))
+    if [ $TRIES -ge 30 ]; then
+      alert "Docker Desktop did not start in time.
+
+Please open Docker Desktop manually and try again."
+      exit 1
+    fi
+  done
+  notify "Docker is ready!"
+fi
+
+# --- 3. Create .env if needed (empty token = no auth on first run) ---
+cd "$APP_DIR"
+if [ ! -f .env ]; then
+  cat > .env <<'ENVEOF'
+# Access token to protect the app (leave empty to disable auth)
+ACCESS_TOKEN=
+ENVEOF
+fi
+
+# --- 4. Check if already running ---
+if docker compose ps --status running 2>/dev/null | grep -q "tiger-cowork"; then
+  notify "Tiger Cowork is already running!"
+  open "$URL"
+  exit 0
+fi
+
+# --- 5. Check port conflict ---
+PORT=3001
+if lsof -i :"$PORT" &>/dev/null; then
+  # Something else is using the port — find out what
+  BLOCKER=$(lsof -i :"$PORT" -t 2>/dev/null | head -1)
+  BLOCKER_NAME=$(ps -p "$BLOCKER" -o comm= 2>/dev/null || echo "unknown")
+  RESULT=$(osascript -e "display dialog \"Port $PORT is already in use by '$BLOCKER_NAME'.
+
+Would you like to stop it and continue?\" with title \"Tiger Cowork\" buttons {\"Cancel\", \"Stop & Continue\"} default button \"Stop & Continue\" with icon caution" 2>/dev/null || echo "cancel")
+
+  if echo "$RESULT" | grep -q "Stop & Continue"; then
+    kill "$BLOCKER" 2>/dev/null
+    sleep 2
+    # Force kill if still running
+    if lsof -i :"$PORT" &>/dev/null; then
+      kill -9 "$BLOCKER" 2>/dev/null
+      sleep 1
+    fi
+  else
+    exit 0
+  fi
+fi
+
+# --- 6. Build and start ---
+notify "Building and starting Tiger Cowork..."
+
+docker compose up --build -d > "$LOG_FILE" 2>&1
+BUILD_EXIT=$?
+
+if [ $BUILD_EXIT -ne 0 ]; then
+  alert "Failed to start Tiger Cowork.
+
+Check the log at:
+$LOG_FILE"
+  exit 1
+fi
+
+# --- 6. Wait for server to be ready ---
+TRIES=0
+while ! curl -s "$URL" > /dev/null 2>&1; do
+  sleep 1
+  TRIES=$((TRIES + 1))
+  if [ $TRIES -ge 30 ]; then
+    break
+  fi
+done
+
+# --- 7. Open browser ---
+open "$URL"
+notify "Tiger Cowork is running at $URL"

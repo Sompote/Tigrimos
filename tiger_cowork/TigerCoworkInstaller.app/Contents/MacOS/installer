@@ -1,0 +1,363 @@
+#!/usr/bin/env bash
+# Tiger Cowork — One-Click Mac Installer App
+# Installs directly to ~/TigerCowork — no folder chooser
+
+set -e
+
+export PATH="/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.docker/bin:$PATH"
+
+APP_NAME="Tiger Cowork"
+REPO_URL="https://github.com/Sompote/tiger_cowork.git"
+INSTALL_DIR="$HOME/TigerCowork"
+URL="http://localhost:3001"
+LOG_FILE="/tmp/tiger-cowork-install.log"
+PROGRESS_HTML="/tmp/tiger-cowork-progress.html"
+
+# --- Progress Window (HTML) ---
+write_progress() {
+  local STEP="$1"
+  local TOTAL="$2"
+  local TITLE="$3"
+  local STATUS="$4"
+  local PERCENT=$(( (STEP * 100) / TOTAL ))
+
+  cat > "$PROGRESS_HTML" <<HTMLEOF
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="2">
+<title>Installing Tiger Cowork</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Helvetica Neue", sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    color: #fff;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 48px;
+    width: 520px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .logo {
+    font-size: 56px;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+  .progress-bar {
+    background: rgba(255,255,255,0.1);
+    border-radius: 12px;
+    height: 24px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 12px;
+    background: linear-gradient(90deg, #f59e0b, #f97316);
+    width: ${PERCENT}%;
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    min-width: 40px;
+  }
+  .step-title {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: #f59e0b;
+  }
+  .step-status {
+    color: rgba(255,255,255,0.6);
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .steps {
+    text-align: left;
+    margin-top: 8px;
+  }
+  .step-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 13px;
+    color: rgba(255,255,255,0.4);
+  }
+  .step-row.done { color: #4ade80; }
+  .step-row.active { color: #f59e0b; font-weight: 600; }
+  .step-row .icon { width: 20px; text-align: center; }
+  .spinner { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🐯</div>
+  <h1>Tiger Cowork</h1>
+  <div class="subtitle">Installing to ~/TigerCowork</div>
+
+  <div class="progress-bar">
+    <div class="progress-fill">${PERCENT}%</div>
+  </div>
+
+  <div class="step-title">${TITLE}</div>
+  <div class="step-status">${STATUS}</div>
+
+  <div class="steps">
+    $(step_row 1 "$STEP" "Check Docker")
+    $(step_row 2 "$STEP" "Start Docker Engine")
+    $(step_row 3 "$STEP" "Check Git")
+    $(step_row 4 "$STEP" "Download Tiger Cowork")
+    $(step_row 5 "$STEP" "Configure")
+    $(step_row 6 "$STEP" "Build & Start Container")
+    $(step_row 7 "$STEP" "Launch App")
+  </div>
+</div>
+</body>
+</html>
+HTMLEOF
+}
+
+step_row() {
+  local NUM="$1"
+  local CURRENT="$2"
+  local LABEL="$3"
+  if [ "$NUM" -lt "$CURRENT" ]; then
+    echo "<div class=\"step-row done\"><span class=\"icon\">✓</span> Step $NUM: $LABEL</div>"
+  elif [ "$NUM" -eq "$CURRENT" ]; then
+    echo "<div class=\"step-row active\"><span class=\"icon spinner\">⟳</span> Step $NUM: $LABEL</div>"
+  else
+    echo "<div class=\"step-row\"><span class=\"icon\">○</span> Step $NUM: $LABEL</div>"
+  fi
+}
+
+# --- Alert helper ---
+alert() {
+  osascript -e "display dialog \"$1\" with title \"$APP_NAME\" buttons {\"OK\"} default button \"OK\" with icon caution"
+}
+
+# ============================================================
+# Open progress window
+# ============================================================
+write_progress 1 7 "Checking Docker..." "Looking for Docker installation"
+open "$PROGRESS_HTML"
+sleep 1
+
+# ============================================================
+# STEP 1: Check Docker
+# ============================================================
+write_progress 1 7 "Checking Docker..." "Looking for Docker installation"
+
+if ! docker --version &>/dev/null 2>&1; then
+  write_progress 1 7 "Installing Docker Desktop..." "Downloading — this may take a few minutes"
+
+  ARCH=$(uname -m)
+  if [ "$ARCH" = "arm64" ]; then
+    DOCKER_DMG_URL="https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+  else
+    DOCKER_DMG_URL="https://desktop.docker.com/mac/main/amd64/Docker.dmg"
+  fi
+
+  curl -fsSL -o /tmp/Docker.dmg "$DOCKER_DMG_URL" 2>>"$LOG_FILE"
+
+  write_progress 1 7 "Installing Docker Desktop..." "Mounting and installing"
+  hdiutil attach /tmp/Docker.dmg -quiet 2>>"$LOG_FILE"
+  cp -R "/Volumes/Docker/Docker.app" /Applications/ 2>>"$LOG_FILE"
+  hdiutil detach "/Volumes/Docker" -quiet 2>>"$LOG_FILE"
+  rm -f /tmp/Docker.dmg
+fi
+
+# ============================================================
+# STEP 2: Start Docker Engine
+# ============================================================
+write_progress 2 7 "Starting Docker Engine..." "Waiting for Docker daemon"
+
+if ! docker info &>/dev/null 2>&1; then
+  open -a Docker
+  TRIES=0
+  while ! docker info &>/dev/null 2>&1; do
+    sleep 3
+    TRIES=$((TRIES + 1))
+    write_progress 2 7 "Starting Docker Engine..." "Waiting for daemon... (${TRIES}s)"
+    if [ $TRIES -ge 40 ]; then
+      alert "Docker Desktop did not start in time. Please open it manually and try again."
+      rm -f "$PROGRESS_HTML"
+      exit 1
+    fi
+  done
+fi
+
+# ============================================================
+# STEP 3: Check Git
+# ============================================================
+write_progress 3 7 "Checking Git..." "Verifying git is available"
+
+if ! command -v git &>/dev/null; then
+  write_progress 3 7 "Installing Git..." "Xcode Command Line Tools required"
+  xcode-select --install 2>/dev/null || true
+  alert "Git is being installed. Please complete the Xcode tools popup, then run this installer again."
+  rm -f "$PROGRESS_HTML"
+  exit 0
+fi
+
+# ============================================================
+# STEP 4: Clone / Update repo
+# ============================================================
+write_progress 4 7 "Downloading Tiger Cowork..." "Cloning repository"
+
+if [ -d "$INSTALL_DIR" ]; then
+  write_progress 4 7 "Updating Tiger Cowork..." "Pulling latest changes"
+  cd "$INSTALL_DIR" && git pull >>"$LOG_FILE" 2>&1
+else
+  git clone "$REPO_URL" "$INSTALL_DIR" >>"$LOG_FILE" 2>&1
+fi
+
+cd "$INSTALL_DIR"
+
+# ============================================================
+# STEP 5: Configure
+# ============================================================
+write_progress 5 7 "Configuring..." "Setting up environment"
+
+if [ ! -f .env ]; then
+  cat > .env <<'ENVEOF'
+# Access token to protect the app (leave empty to disable auth)
+ACCESS_TOKEN=
+ENVEOF
+fi
+
+# Check port conflict
+PORT=3001
+if lsof -i :"$PORT" &>/dev/null; then
+  BLOCKER=$(lsof -i :"$PORT" -t 2>/dev/null | head -1)
+  BLOCKER_NAME=$(ps -p "$BLOCKER" -o comm= 2>/dev/null || echo "unknown")
+  RESULT=$(osascript -e "display dialog \"Port $PORT is in use by '$BLOCKER_NAME'. Stop it?\" with title \"$APP_NAME\" buttons {\"Cancel\", \"Stop & Continue\"} default button \"Stop & Continue\" with icon caution" 2>/dev/null || echo "cancel")
+  if echo "$RESULT" | grep -q "Stop & Continue"; then
+    kill "$BLOCKER" 2>/dev/null; sleep 2
+    lsof -i :"$PORT" &>/dev/null && kill -9 "$BLOCKER" 2>/dev/null && sleep 1
+  else
+    rm -f "$PROGRESS_HTML"
+    exit 0
+  fi
+fi
+
+# ============================================================
+# STEP 6: Build & Start
+# ============================================================
+write_progress 6 7 "Building & Starting..." "This may take a few minutes on first run"
+
+docker compose up --build -d >>"$LOG_FILE" 2>&1
+BUILD_EXIT=$?
+
+if [ $BUILD_EXIT -ne 0 ]; then
+  write_progress 6 7 "Build Failed" "Check log: $LOG_FILE"
+  alert "Failed to start Tiger Cowork. Check log at: $LOG_FILE"
+  rm -f "$PROGRESS_HTML"
+  exit 1
+fi
+
+# Wait for server
+TRIES=0
+while ! curl -s "$URL" > /dev/null 2>&1; do
+  sleep 1
+  TRIES=$((TRIES + 1))
+  write_progress 6 7 "Starting server..." "Waiting for app to be ready... (${TRIES}s)"
+  if [ $TRIES -ge 60 ]; then
+    break
+  fi
+done
+
+# ============================================================
+# STEP 7: Done!
+# ============================================================
+cat > "$PROGRESS_HTML" <<'DONEEOF'
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tiger Cowork — Installed!</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Helvetica Neue", sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    color: #fff;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 48px;
+    width: 520px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .logo { font-size: 64px; margin-bottom: 12px; }
+  h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; color: #4ade80; }
+  .subtitle { color: rgba(255,255,255,0.6); font-size: 15px; margin-bottom: 32px; }
+  .btn {
+    display: inline-block;
+    background: linear-gradient(90deg, #f59e0b, #f97316);
+    color: #fff;
+    padding: 14px 36px;
+    border-radius: 12px;
+    text-decoration: none;
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    transition: transform 0.2s;
+  }
+  .btn:hover { transform: scale(1.05); }
+  .info {
+    color: rgba(255,255,255,0.4);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🐯</div>
+  <h1>Installation Complete!</h1>
+  <div class="subtitle">Tiger Cowork is up and running</div>
+  <a class="btn" href="http://localhost:3001" target="_blank">Open Tiger Cowork</a>
+  <div class="info">
+    Installed at: ~/TigerCowork<br>
+    To stop: open Docker Desktop → Containers → Stop tiger-cowork<br>
+    To restart: double-click TigerCowork.app
+  </div>
+</div>
+</body>
+</html>
+DONEEOF
+
+open "$URL"

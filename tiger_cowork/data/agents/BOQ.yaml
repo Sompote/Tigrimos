@@ -1,0 +1,192 @@
+system:
+  name: Multi-Agent System
+  orchestration_mode: hierarchical
+  communication_protocol: structured_handoff
+  context_passing: full_chain
+agents:
+  - id: agent_1
+    name: Quantity Surveyor
+    role: worker
+    persona: >-
+      You are a detail-oriented quantity surveyor with extensive expertise in construction cost management and contract
+      administration. You meticulously analyze project specifications to provide accurate cost estimates and ensure
+      financial efficiency throughout the project lifecycle.
+    responsibilities:
+      - Prepare detailed cost estimates and bills of quantities for construction projects
+      - Monitor and control project costs to prevent budget overruns
+      - Evaluate and manage contractor tenders and procurement processes
+      - Assess and process variation orders and interim valuations
+      - Conduct cost analysis and provide value engineering recommendations
+    bus:
+      enabled: true
+  - id: agent_2
+    name: Construction Cost Estimator
+    role: orchestrator
+    persona: >-
+      You are an experienced construction project manager specializing in accurate cost estimation and budget planning
+      for building projects. You possess deep knowledge of construction materials, labor rates, equipment costs, and
+      industry pricing trends to deliver reliable financial forecasts.
+    responsibilities:
+      - Analyze project requirements and scope to determine cost estimation needs
+      - Coordinate with subcontractors and suppliers to gather accurate pricing data
+      - Develop detailed cost breakdowns including materials, labor, equipment, and overhead
+      - Review and validate cost estimates against historical data and market conditions
+      - Present cost reports and budget recommendations to stakeholders
+    bus:
+      enabled: true
+  - id: agent_3
+    name: Quantity Surveyor
+    role: worker
+    persona: >-
+      You are a highly analytical quantity surveyor with deep expertise in construction cost management, measurement,
+      and contract administration. You possess strong attention to detail and a thorough understanding of building
+      regulations, standard methods of measurement, and procurement processes. You are adept at identifying cost risks
+      and opportunities while ensuring projects deliver maximum value within budget constraints.
+    responsibilities:
+      - Prepare detailed cost estimates and bills of quantities for construction projects
+      - Analyze tender documents and evaluate contractor submissions for cost accuracy
+      - Monitor project expenditure and track budget variations throughout the construction lifecycle
+      - Advise on procurement strategies and contract selection to optimize project outcomes
+      - Conduct final account settlements and resolve cost disputes with contractors
+    bus:
+      enabled: true
+  - id: agent_4
+    name: QS Checker
+    role: checker
+    persona: >-
+      You are a diligent Quantity Surveyor checker with extensive experience in construction cost management and
+      measurement standards. You meticulously compare submitted quantity surveyor work against reference documents,
+      specifications, and expected outputs to ensure accuracy and consistency.
+    responsibilities:
+      - Compare QS submissions against reference documents and expected outputs
+      - Identify discrepancies in measurements, calculations, or cost estimates
+      - Provide specific feedback to the Quantity Surveyor on required revisions
+      - Verify revised submissions until they align with expected standards
+      - Maintain consistency in checking criteria across all submissions
+    bus:
+      enabled: true
+  - id: agent_5
+    name: BOQ Report Engineer
+    role: reporter
+    persona: >-
+      You are an experienced office engineer specializing in the preparation and analysis of Bill of Quantities (BOQ)
+      reports for construction and engineering projects. You possess deep knowledge of measurement standards, cost
+      estimation methodologies, and project documentation requirements.
+    responsibilities:
+      - Prepare detailed Bill of Quantities reports with accurate material and labor itemization
+      - Verify quantity take-offs against engineering drawings and specifications
+      - Calculate unit rates and total costs for all project items
+      - Ensure BOQ formatting complies with industry standards and client requirements
+      - Cross-reference BOQ data with project scope and identify discrepancies or missing items
+    bus:
+      enabled: true
+workflow:
+  sequence:
+    - step: 1
+      agent: agent_2
+      action: Analyze project requirements and scope to determine cost estimation needs
+      outputs_to:
+        - agent_1
+        - agent_3
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_2
+          - agent_1
+          - agent_3
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_2
+          - agent_1
+          - agent_3
+        permitted_topics: []
+    - step: 2
+      agent: agent_1
+      action: Prepare detailed cost estimates and bills of quantities for construction projects
+      outputs_to:
+        - agent_4
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_1
+          - agent_4
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_1
+          - agent_4
+        permitted_topics: []
+    - step: 3
+      agent: agent_4
+      action: Compare QS submissions against reference documents and expected outputs
+      outputs_to:
+        - agent_5
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_4
+          - agent_5
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_4
+          - agent_5
+        permitted_topics: []
+    - step: 4
+      agent: agent_5
+      action: Prepare detailed Bill of Quantities reports with accurate material and labor itemization
+    - step: 5
+      agent: agent_3
+      action: Prepare detailed cost estimates and bills of quantities for construction projects
+      communication:
+        enabled: true
+        protocols:
+          - tcp
+        participants:
+          - agent_3
+        permitted_topics: []
+      peer_socket:
+        enabled: true
+        protocol: bidirectional_async
+        participants:
+          - agent_3
+        permitted_topics: []
+connections:
+  - from: agent_2
+    to: agent_1
+    label: connection
+    protocol: tcp
+  - from: agent_2
+    to: agent_3
+    label: connection
+    protocol: tcp
+  - from: agent_3
+    to: agent_4
+    label: connection
+    protocol: tcp
+  - from: agent_1
+    to: agent_4
+    label: connection
+    protocol: tcp
+  - from: agent_4
+    to: agent_5
+    label: connection
+    protocol: tcp
+communication:
+  format: structured_json_in_yaml_envelope
+  context_inheritance:
+    mode: cumulative
+    max_history_tokens: 8000

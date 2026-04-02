@@ -1,0 +1,29 @@
+# Built app bundles (too large for git)
+TigrimOS.app/
+TigrimOS_i.app/
+*.dmg
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Swift build
+.build/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example

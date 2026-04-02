@@ -1,0 +1,168 @@
+[
+  {
+    "id": "d55b1ae6-b809-4363-8bf6-3b77eff1cace",
+    "name": "SASW research",
+    "description": "",
+    "workingFolder": "/root/cowork/project/sasw",
+    "memory": "# Project Memory: SASW Research\n\n## Project Overview\n- **Project Name**: SASW\n- **Purpose**: Research project\n- **Created**: 2025-01-17\n\n## Key Information\n- This project is dedicated to SASW research activities\n\n## Notes\n- Add project-specific information, decisions, and conventions as they are discovered\n\nUser is Sompote Youwai",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "d812629d-1160-4e8a-a199-e67a7f132057",
+      "c317a611-412c-42bd-812c-e4e3ec01bf33",
+      "97436772-69e1-4062-b309-0af7f5445207",
+      "db7ef2ef-afb4-451c-8c47-105b90a3c3d4"
+    ],
+    "createdAt": "2026-03-09T02:42:32.823Z",
+    "updatedAt": "2026-03-16T12:52:07.647Z"
+  },
+  {
+    "id": "cc3aa3dd-3154-486a-9ab4-275ea3dc4262",
+    "name": "BOQ",
+    "description": "BOQ",
+    "workingFolder": "/root/cowork/project/boq",
+    "memory": "# Project Memory: BOQ (Bill of Quantities)\n\n## **Project Overview**\nThe BOQ project is an automated material estimation and Bill of Quantities generation system. It utilizes AI agents to analyze architectural drawings (e.g., image files like `draw1.png`) to perform quantity take-offs, verify measurements, and generate structured reports for construction cost estimation.\n\n## **Tech Stack**\n*   **AI Agents/Roles**: \n    *   **Construction Cost Estimator (Orchestrator)**: Manages the workflow and scope.\n    *   **Quantity Surveyor**: Performs detailed take-offs and material measurements.\n    *   **QS Checker**: Validates measurements against architectural standards.\n    *   **BOQ Report Engineer**: Compiles final reports.\n*   **Specialized Engines/Skills**: `quantity-survey-arch` (architectural computation engine).\n*   **File Formats**: PNG (drawings), XLSX (reports), PDF (output tables).\n\n## **Key Decisions**\n*   **Multi-Agent Workflow**: Implementation of a multi-tier verification process (Surveyor -> Checker -> Orchestrator) to ensure professional-grade accuracy in material estimates.\n*   **Standardized Take-offs**: Use of specialized architectural skills to align computations with industry standards.\n\n## **File Structure**\n*   `draw1.png`: The primary architectural drawing used for material estimation.\n*   `Architectural_BOQ_Report.xlsx`: The data source/output for quantified material lists.\n\n## **Current Status**\n*   **Completed Tasks**:\n    *   Analysis of `draw1.png` for structural and architectural elements.\n    *   Initial material estimation: Excavation (150 m³), Concrete (45 m³), Masonry (1,200 m²), Plastering (2,400 m²), and Roofing (350 m²).\n    *   Enumeration of openings: 10 Doors (D1, D2, D3 types) and 8 Windows.\n*   **In Progress**:\n    *   Recreating BOQ tables in PDF format.\n    *   Re-investigating estimates using specialized architectural skills for higher precision.\n\n## **Notes**\n*   The system encountered initial API rate-limiting issues (429/500 errors) which were resolved in later sessions.\n*   The project distinguishes between general material quantities and specific \"Openings\" (Doors/Windows) counts.",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "3546b381-0fe3-4c62-ba02-1e83af4959c4",
+      "85f148c4-45a5-403e-96ae-807be792dc50",
+      "ac2a249f-9b3d-40fa-8a69-899d6876ae0e",
+      "8495d368-4261-4d8d-b924-26a45fd29896",
+      "5b0b5ca9-aa66-411b-8171-903f0dd68c62"
+    ],
+    "createdAt": "2026-03-16T10:46:13.040Z",
+    "updatedAt": "2026-03-16T12:34:42.232Z"
+  },
+  {
+    "id": "6a4f28db-6d17-467f-ad10-04766668afe1",
+    "name": "hypoplastic",
+    "description": "",
+    "workingFolder": "hypoplastic",
+    "memory": "",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "8495d368-4261-4d8d-b924-26a45fd29896",
+      "36481539-981e-4207-b7eb-34550ce6ac0d"
+    ],
+    "createdAt": "2026-03-27T23:22:38.570Z",
+    "updatedAt": "2026-03-27T23:41:14.778Z"
+  },
+  {
+    "id": "f5b9d9d7-2939-41aa-bb7b-a9d9e315664c",
+    "name": "hypoplastic2",
+    "description": "",
+    "workingFolder": "hypoplas",
+    "memory": "",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "97436772-69e1-4062-b309-0af7f5445207",
+      "8495d368-4261-4d8d-b924-26a45fd29896",
+      "ac2a249f-9b3d-40fa-8a69-899d6876ae0e",
+      "85f148c4-45a5-403e-96ae-807be792dc50",
+      "3546b381-0fe3-4c62-ba02-1e83af4959c4",
+      "36481539-981e-4207-b7eb-34550ce6ac0d",
+      "c317a611-412c-42bd-812c-e4e3ec01bf33",
+      "472d01c2-1e58-46ba-a496-18b373b90be7",
+      "db7ef2ef-afb4-451c-8c47-105b90a3c3d4",
+      "1790dca1-7fd2-47db-bc94-708ee4df3172",
+      "f9386814-3c60-4d4d-825e-30ced2aba458",
+      "b9df1b15-a572-4ec7-bb19-b0086e86f911"
+    ],
+    "createdAt": "2026-03-28T04:16:07.763Z",
+    "updatedAt": "2026-03-28T04:20:12.933Z"
+  },
+  {
+    "id": "acad78e7-c6e6-441f-a504-5b44bb2c72de",
+    "name": "hypo3",
+    "description": "",
+    "workingFolder": "hypo3",
+    "memory": "",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "97436772-69e1-4062-b309-0af7f5445207",
+      "0bc8d783-4310-48f1-9595-939e35a5cc0e",
+      "3546b381-0fe3-4c62-ba02-1e83af4959c4",
+      "bb7d6a95-e7f9-48f8-b618-07c48fb04495",
+      "ac2a249f-9b3d-40fa-8a69-899d6876ae0e",
+      "8495d368-4261-4d8d-b924-26a45fd29896",
+      "36481539-981e-4207-b7eb-34550ce6ac0d",
+      "c317a611-412c-42bd-812c-e4e3ec01bf33",
+      "472d01c2-1e58-46ba-a496-18b373b90be7",
+      "db7ef2ef-afb4-451c-8c47-105b90a3c3d4",
+      "1790dca1-7fd2-47db-bc94-708ee4df3172",
+      "f9386814-3c60-4d4d-825e-30ced2aba458",
+      "b9d0f3e1-ac36-48e9-9a4f-808a6e1b8e15",
+      "143e17b6-ae13-4cee-8a3c-a5f3f09d0fe9",
+      "ec08d2f3-f693-4670-bb91-ce013cc2e602",
+      "25d0b6bb-537e-4e29-9565-ca48ad4041fa"
+    ],
+    "createdAt": "2026-03-28T06:09:31.658Z",
+    "updatedAt": "2026-03-28T09:46:50.684Z"
+  },
+  {
+    "id": "7240c227-437e-4e2c-b4c2-5cb06e948b8d",
+    "name": "Hypo 3",
+    "description": "",
+    "workingFolder": "/root/cowork/Hypo3",
+    "memory": "",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "3546b381-0fe3-4c62-ba02-1e83af4959c4",
+      "8495d368-4261-4d8d-b924-26a45fd29896",
+      "25d0b6bb-537e-4e29-9565-ca48ad4041fa",
+      "ec08d2f3-f693-4670-bb91-ce013cc2e602",
+      "b9d0f3e1-ac36-48e9-9a4f-808a6e1b8e15",
+      "143e17b6-ae13-4cee-8a3c-a5f3f09d0fe9",
+      "36481539-981e-4207-b7eb-34550ce6ac0d"
+    ],
+    "createdAt": "2026-03-28T12:21:37.640Z",
+    "updatedAt": "2026-03-28T12:27:52.740Z"
+  },
+  {
+    "id": "df12f538-30f8-4f04-9d7c-f2954ea719f3",
+    "name": "SASW",
+    "description": "",
+    "workingFolder": "SASW",
+    "memory": "",
+    "skills": [],
+    "createdAt": "2026-03-30T03:40:57.615Z",
+    "updatedAt": "2026-04-01T11:03:42.932Z"
+  },
+  {
+    "id": "4babf517-a476-44d0-89b3-53dbdc76d381",
+    "name": "tunnel",
+    "description": "",
+    "workingFolder": "tunnel",
+    "memory": "",
+    "skills": [],
+    "createdAt": "2026-04-01T03:48:33.874Z",
+    "updatedAt": "2026-04-01T03:49:29.719Z"
+  },
+  {
+    "id": "ead7eed2-c9de-4734-ad08-40b0e76bc1f2",
+    "name": "web_research",
+    "description": "",
+    "workingFolder": "research",
+    "memory": "",
+    "skills": [],
+    "createdAt": "2026-04-01T22:24:38.566Z",
+    "updatedAt": "2026-04-01T22:24:47.655Z"
+  }
+]
