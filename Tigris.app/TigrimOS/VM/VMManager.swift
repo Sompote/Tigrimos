@@ -450,6 +450,32 @@ class VMManager: NSObject, ObservableObject {
           - net-tools
 
         write_files:
+          - path: /opt/setup-host-gateway.sh
+            permissions: "0755"
+            content: |
+              #!/bin/bash
+              # Add host.local pointing to macOS host (gateway) so VM can reach local AI models
+              GW=$(ip route | grep default | awk '{print $3}' | head -1)
+              if [ -n "$GW" ]; then
+                grep -q "host.local" /etc/hosts || echo "$GW host.local host.docker.internal" >> /etc/hosts
+                echo "[TigrimOS] Host gateway: $GW (accessible as host.local)"
+              fi
+
+          - path: /etc/systemd/system/host-gateway.service
+            content: |
+              [Unit]
+              Description=Set host.local to macOS gateway IP
+              After=network-online.target
+              Wants=network-online.target
+
+              [Service]
+              Type=oneshot
+              ExecStart=/bin/bash /opt/setup-host-gateway.sh
+              RemainAfterExit=yes
+
+              [Install]
+              WantedBy=multi-user.target
+
           - path: /opt/setup-tigris.sh
             permissions: "0755"
             content: |
@@ -570,6 +596,8 @@ class VMManager: NSObject, ObservableObject {
         runcmd:
           - systemctl enable mount-virtiofs
           - systemctl start mount-virtiofs
+          - systemctl enable host-gateway
+          - systemctl start host-gateway
           - systemctl enable print-ip
           - systemctl start print-ip
           - /bin/bash /opt/setup-tigris.sh

@@ -226,6 +226,9 @@ export default function SettingsPage() {
                     anthropic_claude_code: { url: "https://api.anthropic.com/v1", model: "claude-sonnet-4-20250514" },
                     minimax: { url: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
                     google_ai_studio: { url: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-3-flash-preview" },
+                    ollama_local: { url: "http://host.local:11434/v1", model: "llama3.2" },
+                    lmstudio_local: { url: "http://host.local:1234/v1", model: "local-model" },
+                    openai_local: { url: "http://host.local:8080/v1", model: "local-model" },
                   };
                   // Check custom providers for defaults
                   const customProviders: Array<{ id: string; name: string; url: string; model: string }> = settings.customProviders || [];
@@ -243,13 +246,16 @@ export default function SettingsPage() {
                 <option value="anthropic_claude_code">Anthropic (Claude)</option>
                 <option value="minimax">MiniMax</option>
                 <option value="google_ai_studio">Google AI Studio</option>
+                <option value="ollama_local">Ollama (Local macOS)</option>
+                <option value="lmstudio_local">LM Studio (Local macOS)</option>
+                <option value="openai_local">OpenAI-Compatible (Local macOS)</option>
                 {(settings.customProviders || []).map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
               <button className="btn btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => setShowAddProvider(true)}>+ Add</button>
               {/* Show remove button only for custom providers */}
-              {!(["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio"].includes(settings.aiProvider || "openrouter")) && (
+              {!(["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "ollama_local", "lmstudio_local", "openai_local"].includes(settings.aiProvider || "openrouter")) && (
                 <button className="btn btn-danger" style={{ whiteSpace: "nowrap" }} onClick={() => {
                   if (!confirm(`Remove provider "${(settings.customProviders || []).find((p: any) => p.id === settings.aiProvider)?.name || settings.aiProvider}"?`)) return;
                   const customProviders = (settings.customProviders || []).filter((p: any) => p.id !== settings.aiProvider);
@@ -264,6 +270,14 @@ export default function SettingsPage() {
               )}
             </div>
             <p className="hint">Switch between AI providers. Each provider keeps its own API key, URL, and model.</p>
+            {["ollama_local", "lmstudio_local", "openai_local"].includes(settings.aiProvider || "") && (
+              <p className="hint" style={{ color: "var(--success, #4caf50)", marginTop: 4 }}>
+                Local model detected. The VM connects to your Mac via <code>host.local</code>. Make sure the AI server is running on your Mac.
+                {settings.aiProvider === "ollama_local" && " Run: ollama serve"}
+                {settings.aiProvider === "lmstudio_local" && " Start the LM Studio local server."}
+                {" No API key needed for most local servers."}
+              </p>
+            )}
           </div>
           {showAddProvider && (
             <div style={{ background: "var(--bg-secondary, #1a1a2e)", borderRadius: 8, padding: 16, marginBottom: 16, border: "1px solid var(--border, #333)" }}>

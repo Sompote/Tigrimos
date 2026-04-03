@@ -89,8 +89,30 @@ export async function settingsRoutes(fastify: FastifyInstance) {
   fastify.post("/test-connection", async (request, reply) => {
     const { apiKey, apiUrl, model, provider } = request.body as any;
     try {
+      const isLocal = provider === "ollama_local" || provider === "lmstudio_local" || provider === "openai_local" || (apiUrl && apiUrl.includes("host.local"));
       const isAnthropic = provider === "anthropic_claude_code" || (apiUrl && apiUrl.includes("api.anthropic.com"));
-      if (isAnthropic) {
+      if (isLocal) {
+        // Local models — no API key needed, just test the connection
+        const rawUrl = apiUrl || "http://host.local:11434/v1";
+        const url = rawUrl.endsWith("/chat/completions") ? rawUrl : rawUrl.replace(/\/$/, "") + "/chat/completions";
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: model || "llama3.2",
+            messages: [{ role: "user", content: "Hello" }],
+            max_tokens: 10,
+          }),
+        });
+        if (response.ok) {
+          return { success: true, message: `Connected to local model (${model})` };
+        } else {
+          const err = await response.text();
+          return { success: false, message: `Local server error ${response.status}: ${err}` };
+        }
+      } else if (isAnthropic) {
         const url = (apiUrl || "https://api.anthropic.com/v1").replace(/\/$/, "").replace(/\/messages$/, "") + "/messages";
         // OAuth tokens (sk-ant-oat01-) use Bearer; API keys (sk-ant-api) use x-api-key
         const isOAuthToken = apiKey?.startsWith("sk-ant-oat01-");

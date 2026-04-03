@@ -805,12 +805,13 @@ async function getApiConfig() {
   const rawUrl = settings.tigerBotApiUrl || "https://api.tigerbot.com/bot-chat/openai/v1/chat/completions";
   // Anthropic uses /v1/messages endpoint, not /chat/completions
   const isAnthropic = provider === "anthropic_claude_code" || rawUrl.includes("api.anthropic.com");
+  const isLocal = provider === "ollama_local" || provider === "lmstudio_local" || provider === "openai_local" || rawUrl.includes("host.local");
   const apiUrl = isAnthropic
     ? rawUrl.replace(/\/$/, "").replace(/\/messages$/, "") + "/messages"
     : rawUrl.endsWith("/chat/completions") ? rawUrl : rawUrl.replace(/\/$/, "") + "/chat/completions";
   // OAuth tokens (sk-ant-oat01-) use Bearer auth; API keys (sk-ant-api) use x-api-key
   const isOAuthToken = isAnthropic && apiKey?.startsWith("sk-ant-oat01-");
-  return { apiKey, model, apiUrl, isAnthropic, isOAuthToken };
+  return { apiKey, model, apiUrl, isAnthropic, isOAuthToken, isLocal };
 }
 
 // Single LLM call (no tool loop)
@@ -1070,12 +1071,12 @@ async function llmCall(messages: ChatMessage[], options: { tools?: any[]; model?
       body.tools = options.tools;
       body.tool_choice = "auto";
     }
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey && !isLocal) headers["Authorization"] = `Bearer ${apiKey}`;
+    else if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
     response = await fetch(apiUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify(body),
       signal: options.signal,
     });
@@ -2123,12 +2124,11 @@ export async function streamTigerBot(
         }),
       });
     } else {
+      const oaiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (apiKey) oaiHeaders["Authorization"] = `Bearer ${apiKey}`;
       response = await fetch(apiUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
+        headers: oaiHeaders,
         body: JSON.stringify({
           model,
           messages: allMessages,
