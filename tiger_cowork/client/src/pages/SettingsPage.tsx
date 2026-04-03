@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { api } from "../utils/api";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { io, Socket } from "socket.io-client";
+import { api, getAccessToken } from "../utils/api";
 import "./PageStyles.css";
 
 const AgentEditor = lazy(() => import("../components/AgentEditor"));
@@ -42,6 +43,87 @@ export default function SettingsPage() {
   const [newProviderModel, setNewProviderModel] = useState("");
   const [_oauthStatus, _setOauthStatus] = useState<{ message: string; success: boolean } | null>(null); // reserved for future use
   const yamlUploadRef = useRef<HTMLInputElement>(null);
+
+  // Terminal state
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalRunning, setTerminalRunning] = useState(false);
+  const terminalSocketRef = useRef<Socket | null>(null);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const terminalInputRef = useRef<HTMLInputElement>(null);
+
+  const scrollTerminal = useCallback(() => {
+    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    if (terminalOutput.length > 0) scrollTerminal();
+  }, [terminalOutput, scrollTerminal]);
+
+  const startTerminal = useCallback(() => {
+    if (terminalSocketRef.current) return;
+    const token = getAccessToken();
+    const socket = io(window.location.origin, {
+      transports: ["websocket", "polling"],
+      auth: { token },
+    });
+    terminalSocketRef.current = socket;
+
+    socket.on("connect", () => {
+      socket.emit("terminal:start");
+    });
+
+    socket.on("terminal:started", () => {
+      setTerminalRunning(true);
+      setTerminalOutput((prev) => [...prev, "--- Terminal connected ---\r\n"]);
+    });
+
+    socket.on("terminal:output", (data: string) => {
+      setTerminalOutput((prev) => {
+        const next = [...prev, data];
+        // Keep last 2000 lines to avoid memory issues
+        return next.length > 2000 ? next.slice(-1500) : next;
+      });
+    });
+
+    socket.on("terminal:exit", ({ code }: { code: number }) => {
+      setTerminalOutput((prev) => [...prev, `\r\n--- Terminal exited (code ${code}) ---\r\n`]);
+      setTerminalRunning(false);
+    });
+
+    socket.on("disconnect", () => {
+      setTerminalRunning(false);
+    });
+  }, []);
+
+  const stopTerminal = useCallback(() => {
+    if (terminalSocketRef.current) {
+      terminalSocketRef.current.emit("terminal:stop");
+      terminalSocketRef.current.disconnect();
+      terminalSocketRef.current = null;
+      setTerminalRunning(false);
+      setTerminalOutput((prev) => [...prev, "\r\n--- Terminal disconnected ---\r\n"]);
+    }
+  }, []);
+
+  const sendTerminalInput = useCallback((input: string) => {
+    if (terminalSocketRef.current && terminalRunning) {
+      terminalSocketRef.current.emit("terminal:input", input + "\n");
+      setTerminalInput("");
+    }
+  }, [terminalRunning]);
+
+  // Cleanup terminal on unmount
+  useEffect(() => {
+    return () => {
+      if (terminalSocketRef.current) {
+        terminalSocketRef.current.emit("terminal:stop");
+        terminalSocketRef.current.disconnect();
+        terminalSocketRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     api.getSettings().then(setSettings);
@@ -887,6 +969,118 @@ export default function SettingsPage() {
                 ))}
               </div>
             </details>
+          )}
+        </section>
+
+        <section className="card">
+          <h3>Terminal</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Connect to the sandbox terminal to install packages, configure services, or debug inside the Ubuntu VM.
+          </p>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {!terminalRunning ? (
+              <button className="btn btn-primary" onClick={() => { setTerminalOpen(true); startTerminal(); }}>
+                Open Terminal
+              </button>
+            ) : (
+              <button className="btn btn-danger" onClick={stopTerminal}>
+                Disconnect
+              </button>
+            )}
+            {terminalOutput.length > 0 && (
+              <button className="btn btn-ghost" onClick={() => { setTerminalOutput([]); }}>
+                Clear
+              </button>
+            )}
+          </div>
+
+          {terminalOpen && (
+            <div
+              style={{
+                background: "#0d1117",
+                borderRadius: 8,
+                border: "1px solid #30363d",
+                overflow: "hidden",
+              }}
+            >
+              {/* Terminal header bar */}
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "6px 12px", background: "#161b22", borderBottom: "1px solid #30363d",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: terminalRunning ? "#3fb950" : "#f85149",
+                  }} />
+                  <span style={{ fontSize: 12, color: "#8b949e", fontFamily: "monospace" }}>
+                    {terminalRunning ? "bash — sandbox" : "disconnected"}
+                  </span>
+                </div>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: "2px 8px" }}
+                  onClick={() => { stopTerminal(); setTerminalOpen(false); }}
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Terminal output */}
+              <div
+                style={{
+                  height: 360,
+                  overflowY: "auto",
+                  padding: "8px 12px",
+                  fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  color: "#c9d1d9",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                }}
+                onClick={() => terminalInputRef.current?.focus()}
+              >
+                {terminalOutput.map((line, i) => (
+                  <span key={i}>{line}</span>
+                ))}
+                <div ref={terminalEndRef} />
+              </div>
+
+              {/* Terminal input */}
+              {terminalRunning && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 0,
+                  borderTop: "1px solid #30363d", background: "#0d1117",
+                }}>
+                  <span style={{
+                    padding: "8px 4px 8px 12px", color: "#3fb950",
+                    fontFamily: "monospace", fontSize: 13, userSelect: "none",
+                  }}>$</span>
+                  <input
+                    ref={terminalInputRef}
+                    value={terminalInput}
+                    onChange={(e) => setTerminalInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        sendTerminalInput(terminalInput);
+                      } else if (e.key === "c" && e.ctrlKey) {
+                        terminalSocketRef.current?.emit("terminal:input", "\x03");
+                      }
+                    }}
+                    placeholder="Type command and press Enter..."
+                    autoFocus
+                    style={{
+                      flex: 1, padding: "8px", border: "none", outline: "none",
+                      background: "transparent", color: "#c9d1d9",
+                      fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace",
+                      fontSize: 13,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </section>
       </div>

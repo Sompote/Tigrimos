@@ -19,6 +19,7 @@ import { toolsRoutes } from "./routes/tools";
 import { clawhubRoutes } from "./routes/clawhub";
 import { projectsRoutes } from "./routes/projects";
 import { agentsRoutes } from "./routes/agents";
+import { terminalRoutes, setupTerminalSocket } from "./routes/terminal";
 import { setupSocket } from "./services/socket";
 import { initMcpServers } from "./services/mcp";
 import { initScheduler } from "./services/scheduler";
@@ -139,6 +140,7 @@ async function start() {
       api.register(clawhubRoutes, { prefix: "/clawhub" });
       api.register(projectsRoutes, { prefix: "/projects" });
       api.register(agentsRoutes, { prefix: "/agents" });
+      api.register(terminalRoutes, { prefix: "/terminal" });
     },
     { prefix: "/api" }
   );
@@ -183,6 +185,7 @@ async function start() {
   }
 
   setupSocket(io);
+  setupTerminalSocket(io);
 
   // Initialize scheduler
   await initScheduler();
