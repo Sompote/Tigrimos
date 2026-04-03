@@ -754,28 +754,45 @@ class VMManager: NSObject, ObservableObject {
             return
         }
 
-        let url = URL(string: "http://\(ip):\(VMConfig.vmPort)/api/auth/verify")!
-        var request = URLRequest(url: url, timeoutInterval: 3)
-        request.httpMethod = "POST"
-        request.httpBody = "{}".data(using: .utf8)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // First check if port 3001 is even open
+        let portOpen = await tryTCPConnect(host: ip, port: VMConfig.vmPort)
+        if !portOpen {
+            appendConsole("[TigrimOS] Waiting for Tiger Cowork to start (port \(VMConfig.vmPort) not open on \(ip))...")
+            return
+        }
 
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                if !serviceReady {
-                    serviceReady = true
-                    state = .running
-                    if !VMConfig.isProvisioned {
-                        FileManager.default.createFile(atPath: VMConfig.provisionedMarker.path, contents: nil)
+        // Port is open — try HTTP endpoints to confirm service is ready
+        // Try multiple endpoints: root, api/auth/verify, health
+        let endpoints = ["/", "/api/auth/verify"]
+        for endpoint in endpoints {
+            let url = URL(string: "http://\(ip):\(VMConfig.vmPort)\(endpoint)")!
+            var request = URLRequest(url: url, timeoutInterval: 3)
+            request.httpMethod = endpoint == "/api/auth/verify" ? "POST" : "GET"
+            if endpoint == "/api/auth/verify" {
+                request.httpBody = "{}".data(using: .utf8)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, (200...499).contains(http.statusCode) {
+                    if !serviceReady {
+                        serviceReady = true
+                        state = .running
+                        if !VMConfig.isProvisioned {
+                            FileManager.default.createFile(atPath: VMConfig.provisionedMarker.path, contents: nil)
+                        }
+                        appendConsole("[TigrimOS] Tiger Cowork is ready at http://\(ip):\(VMConfig.vmPort)")
                     }
-                    appendConsole("[TigrimOS] Tiger Cowork is ready at http://\(ip):\(VMConfig.vmPort)")
+                    return
                 }
+            } catch {
+                continue
             }
-        } catch {
-            if state == .provisioning {
-                appendConsole("[TigrimOS] Waiting for Tiger Cowork to start...")
-            }
+        }
+
+        if !serviceReady {
+            appendConsole("[TigrimOS] Port \(VMConfig.vmPort) open on \(ip) but service not responding yet...")
         }
     }
 
