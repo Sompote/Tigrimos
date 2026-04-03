@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="tiger_cowork/picture/banner2.jpg" alt="TigrimOS Banner" width="100%">
+  <img src="tiger_cowork/picture/banner_tigrimos.png" alt="TigrimOS Banner" width="100%">
 </p>
 
 # TigrimOS v1.0.0
 
-A standalone macOS app — a self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, and a skill marketplace. Powered by Apple's Virtualization.framework. No Docker required.
+A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, and a skill marketplace. Runs on **macOS** and **Windows**. Everything executes inside a **secure Ubuntu sandbox** — no Docker required.
 
-TigrimOS runs everything inside a **secure Ubuntu sandbox**. AI-generated code and shell commands **cannot escape the sandbox** or touch your files without permission. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
+AI-generated code and shell commands **cannot escape the sandbox** or touch your files without permission. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
 
-> **Security first:** Everything runs inside a real Ubuntu VM. Your Mac's file system is completely invisible to the AI unless you explicitly share a folder.
+> **Security first:** Everything runs inside a real Ubuntu sandbox. Your host file system is completely invisible to the AI unless you explicitly share a folder.
 
 ## Screenshots
 
@@ -32,12 +32,15 @@ TigrimOS runs everything inside a **secure Ubuntu sandbox**. AI-generated code a
 
 ## Downloads
 
-| Mac | File | Architecture |
-|-----|------|-------------|
-| Apple Silicon (M1/M2/M3/M4) | **`TigrimOS.app`** | arm64 |
-| Intel | **`TigrimOS_i.app`** | x86_64 |
+| Platform | File | Sandbox Technology |
+|----------|------|--------------------|
+| macOS — Apple Silicon (M1/M2/M3/M4) | **`TigrimOS.app`** | Apple Virtualization.framework |
+| macOS — Intel | **`TigrimOS_i.app`** | Apple Virtualization.framework |
+| Windows 10/11 | **`TigrimOSInstaller.bat`** | WSL2 (Windows Subsystem for Linux) |
 
 ## Requirements
+
+### macOS
 
 - macOS 13.0 (Ventura) or later
 - Xcode Command Line Tools (`xcode-select --install`)
@@ -45,16 +48,23 @@ TigrimOS runs everything inside a **secure Ubuntu sandbox**. AI-generated code a
 - 4 GB RAM available for the VM
 - ~5 GB disk space (Ubuntu image + TigrimOS)
 
+### Windows
+
+- Windows 10 version 2004+ or Windows 11
+- WSL2 support (enabled automatically by the installer)
+- 4 GB RAM available for the WSL2 instance
+- ~5 GB disk space (Ubuntu + TigrimOS)
+
 ## Installation
 
-### Ready-to-Run (pre-built)
+### macOS — Ready-to-Run (pre-built)
 
 1. Download the correct `.app` for your Mac (Intel or Apple Silicon)
 2. Move it to `/Applications`
 3. First launch: right-click the app → **Open** (bypasses Gatekeeper once)
 4. If blocked: **System Settings → Privacy & Security → Open Anyway**
 
-### Build from Source
+### macOS — Build from Source
 
 ```bash
 git clone https://github.com/Sompote/TigrimOS.git
@@ -72,10 +82,25 @@ swift build -c release
 ./Scripts/build.sh all      # Both
 ```
 
+### Windows — Installer
+
+1. Download or clone the repository
+2. Double-click **`TigrimOSInstaller.bat`**
+3. The installer will:
+   - Enable WSL2 (may ask for a restart on first run)
+   - Install Ubuntu 22.04 as a dedicated "TigrimOS" WSL distribution
+   - Install Node.js 20 + Python 3 inside the sandbox
+   - Clone, build, and start TigrimOS
+4. A desktop shortcut **TigrimOS** is created automatically
+
+After installation, use **`TigrimOSStart.bat`** to launch and **`TigrimOSStop.bat`** to stop.
+
 ## Quick Start
 
-1. **Launch** TigrimOS — the app opens with a setup wizard on first run
-2. **Wait** for Ubuntu VM to download and provision (~5-10 minutes on first launch)
+1. **Launch** TigrimOS
+   - **macOS:** Open the app — the setup wizard runs on first launch
+   - **Windows:** Double-click `TigrimOSStart.bat` (or the desktop shortcut)
+2. **Wait** for the Ubuntu sandbox to provision (~5-10 minutes on first launch)
 3. **Open Settings** → enter your API Key, API URL, and Model
 4. **Click Test Connection** to verify
 5. **Start chatting** — the AI can search the web, run code, generate charts, and more
@@ -84,11 +109,11 @@ Subsequent launches start in ~30 seconds (no re-download).
 
 ## Connect a Local LLM (Ollama, llama.cpp, LM Studio)
 
-TigrimOS can use AI models running on your Mac — no cloud API key needed.
+TigrimOS can use AI models running on your host machine — no cloud API key needed.
 
 ### Step 1: Start your local model server on `0.0.0.0`
 
-The server **must** listen on `0.0.0.0` (all interfaces), not `127.0.0.1`. The VM connects through a network bridge, so localhost-only servers are unreachable.
+The server **must** listen on `0.0.0.0` (all interfaces), not `127.0.0.1`. The sandbox connects through a network bridge, so localhost-only servers are unreachable.
 
 **llama.cpp / llama-server:**
 ```bash
@@ -109,12 +134,14 @@ In the TigrimOS web UI, go to **Settings → AI Provider**:
 
 | Field | llama.cpp | Ollama | LM Studio |
 |-------|-----------|--------|-----------|
-| **Provider** | OpenAI-Compatible (Local macOS) | Ollama (Local macOS) | LM Studio (Local macOS) |
+| **Provider** | OpenAI-Compatible (Local) | Ollama (Local) | LM Studio (Local) |
 | **API URL** | `http://host.local:8080/v1` | `http://host.local:11434/v1` | `http://host.local:1234/v1` |
 | **Model** | Your model name (e.g. `LiquidAI/LFM2.5-1.2B-Instruct-GGUF`) | `llama3.2`, `mistral`, etc. | `local-model` |
 | **API Key** | `local` (any text) | `local` (any text) | `local` (any text) |
 
-> `host.local` is a special hostname inside the VM that routes to your Mac. It's set up automatically during provisioning.
+> **macOS:** `host.local` is a special hostname inside the VM that routes to your Mac. It's set up automatically during provisioning.
+>
+> **Windows:** `host.local` resolves to your Windows host via WSL2 networking. If it doesn't work, use your PC's local IP address (e.g. `192.168.1.x`).
 
 ### Step 3: Test Connection
 
@@ -126,7 +153,7 @@ Click **Test Connection** in Settings. If it succeeds, you're ready to chat.
 |---------|----------|
 | "fetch failed" | Make sure the server is running with `--host 0.0.0.0` |
 | "Connection error" | Check the port number matches your server |
-| "host.local not found" | Click **Reset VM** in toolbar → restart the app |
+| "host.local not found" | **macOS:** Click **Reset VM** in toolbar → restart the app. **Windows:** Use your PC's IP instead |
 | Server works in browser but not in TigrimOS | Your server is on `127.0.0.1` — restart with `0.0.0.0` |
 
 ## Key Features
@@ -140,22 +167,22 @@ Click **Test Connection** in Settings. If it succeeds, you're ready to chat.
 - **Output Panel** — renders React components, charts, HTML, PDF, Word, Excel, images, and Markdown
 - **Skills & ClawHub** — install AI skills from the marketplace or build your own
 - **Projects** — dedicated workspaces with memory, skill selection, and file browser
+- **Cross-Platform** — native macOS app + Windows WSL2 installer
 
 ## Security Model
 
-TigrimOS runs inside a full VM sandbox:
+TigrimOS runs inside a full sandbox on both platforms:
 
-| Layer | Protection |
-|-------|-----------|
-| **VM Isolation** | Real Ubuntu 22.04 VM via Apple Virtualization.framework |
-| **File System** | Host files are **invisible** to the VM by default |
-| **Shared Folders** | You choose which folders to share — read-only by default |
-| **Write Access** | Requires explicit per-folder toggle |
-| **Network** | NAT networking — VM can access internet but is isolated from host network |
-| **Process Isolation** | VM processes cannot see or affect Mac processes |
-| **Audit Log** | All file access grants and revokes are logged |
+| Layer | macOS | Windows |
+|-------|-------|---------|
+| **Sandbox** | Ubuntu 22.04 VM via Virtualization.framework | Ubuntu 22.04 via WSL2 |
+| **File System** | Host files **invisible** by default | Host files **invisible** by default |
+| **Shared Folders** | VirtioFS opt-in, read-only default | Symlink opt-in via installer |
+| **Write Access** | Requires explicit per-folder toggle | Requires explicit configuration |
+| **Network** | NAT — VM isolated from host network | WSL2 NAT — isolated from host network |
+| **Process Isolation** | VM processes cannot see host processes | WSL2 processes isolated from Windows |
 
-### Shared Folders
+### Shared Folders (macOS)
 
 By default the VM has **zero access** to your Mac's files. To share a folder:
 
@@ -165,7 +192,17 @@ By default the VM has **zero access** to your Mac's files. To share a folder:
 4. Toggle to **Read & Write** if needed (requires VM restart)
 5. Shared folders appear inside the VM at `/mnt/shared/<name>`
 
+### Shared Folders (Windows)
+
+During installation, you can optionally choose a folder to share. It appears inside WSL2 at `/mnt/shared/host`. You can also manually mount Windows folders:
+
+```powershell
+wsl -d TigrimOS -- bash -c "ln -sf /mnt/c/Users/YOU/Documents /mnt/shared/docs"
+```
+
 ## Architecture
+
+### macOS
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -195,7 +232,39 @@ By default the VM has **zero access** to your Mac's files. To share a folder:
 └──────────────────────────────────────────────────┘
 ```
 
+### Windows
+
+```
+┌──────────────────────────────────────────────────┐
+│            TigrimOSStart.bat (Windows)           │
+│                                                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │      Browser → http://localhost:3001       │  │
+│  └────────────────┬───────────────────────────┘  │
+│                   │                              │
+│  ┌────────────────▼───────────────────────────┐  │
+│  │       WSL2 (Windows Subsystem for Linux)   │  │
+│  │                                            │  │
+│  │  ┌──────────────────────────────────────┐  │  │
+│  │  │     Ubuntu 22.04 "TigrimOS" distro  │  │  │
+│  │  │                                      │  │  │
+│  │  │   TigrimOS v1.0.0                   │  │  │
+│  │  │   ├── Fastify server :3001          │  │  │
+│  │  │   ├── Node.js 20                    │  │  │
+│  │  │   ├── Python 3 + numpy/pandas/...   │  │  │
+│  │  │   └── 16 built-in AI tools          │  │  │
+│  │  │                                      │  │  │
+│  │  │   /mnt/shared/ ← symlink (opt-in)  │  │  │
+│  │  └──────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────┘  │
+│                                                  │
+│  C:\Users\YOU\SharedFolder (optional)            │
+└──────────────────────────────────────────────────┘
+```
+
 ## App Controls
+
+### macOS
 
 | Tab | Description |
 |-----|-------------|
@@ -207,28 +276,38 @@ By default the VM has **zero access** to your Mac's files. To share a folder:
 |--------|--------|
 | **Start** | Boot the Ubuntu VM and start TigrimOS |
 | **Stop** | Gracefully shut down the VM |
-| **Settings → Reset VM** | Wipe and re-provision from scratch |
+| **Reset VM** | Wipe and re-provision from scratch |
+
+### Windows
+
+| Script | Action |
+|--------|--------|
+| **TigrimOSStart.bat** | Start the WSL2 server and open browser |
+| **TigrimOSStop.bat** | Stop the TigrimOS server |
+| **TigrimOSInstaller.bat** | Re-run installer (update or repair) |
 
 ## Troubleshooting
 
-### "App cannot be opened" on first launch
+### macOS
+
+**"App cannot be opened" on first launch**
 Right-click → **Open**, or go to **System Settings → Privacy & Security → Open Anyway**.
 
-### VM starts but TigrimOS doesn't load
+**VM starts but TigrimOS doesn't load**
 Check the **Console** tab for errors. Common causes:
 - First run provisioning still in progress (wait 5-10 minutes)
 - Port 3001 is in use by another app — stop it first
 - `qemu` not installed — run `brew install qemu`
 
-### How to reset everything
-In the app: **Settings → Reset VM**
+**How to reset everything**
+In the app: click **Reset VM** in the toolbar.
 
 Or manually:
 ```bash
 rm -rf ~/Library/Application\ Support/TigrimOS/
 ```
 
-### Where is the VM data stored?
+**Where is the VM data stored?**
 ```
 ~/Library/Application Support/TigrimOS/
 ├── ubuntu-cloud.qcow2    # Downloaded Ubuntu image (cached)
@@ -239,13 +318,42 @@ rm -rf ~/Library/Application\ Support/TigrimOS/
 └── shared_folders.json    # Your shared folder settings
 ```
 
+### Windows
+
+**"WSL2 is not installed or not enabled"**
+Run `TigrimOSInstaller.bat` — it enables WSL2 automatically. You may need to restart your PC after the first run.
+
+**Installer says "restart required"**
+WSL2 requires a one-time Windows restart after enabling. Restart and run the installer again.
+
+**Server doesn't start**
+Check the log inside WSL:
+```powershell
+wsl -d TigrimOS -- cat /tmp/tigrimos.log
+```
+
+**How to reset everything (Windows)**
+```powershell
+wsl --unregister TigrimOS
+```
+Then run `TigrimOSInstaller.bat` again.
+
+**Where is WSL data stored?**
+```
+%LOCALAPPDATA%\TigrimOS\WSL\    # WSL2 virtual disk
+```
+
 ## Project Structure
 
 ```
 TigrimOS/
-├── TigrimOS.app              # Apple Silicon app (ready to run)
-├── TigrimOS_i.app            # Intel app (ready to run)
-├── src/                      # Source code project
+├── TigrimOS.app              # macOS Apple Silicon app (ready to run)
+├── TigrimOS_i.app            # macOS Intel app (ready to run)
+├── TigrimOSInstaller.bat     # Windows installer launcher
+├── TigrimOSStart.bat         # Windows start script
+├── TigrimOSStop.bat          # Windows stop script
+├── install_windows.ps1       # Windows WPF installer (WSL2-based)
+├── src/                      # macOS native app source
 │   ├── Package.swift
 │   ├── TigrimOS/
 │   │   ├── TigrimOSApp.swift
@@ -270,7 +378,7 @@ TigrimOS/
 │       ├── build.sh
 │       ├── create-dmg.sh
 │       └── setup-vm.sh
-└── tiger_cowork/             # AI workspace engine (mounted into VM)
+└── tiger_cowork/             # AI workspace engine (runs inside sandbox)
 ```
 
 ## Documentation
