@@ -37,7 +37,7 @@ timeout /t 1 /nobreak >nul
 :: The WSL session must stay alive for the server to keep running
 echo   Starting TigrimOS server...
 echo.
-start "TigrimOS Server" /min wsl -d TigrimOS -u root -- bash -c "cd /opt/TigrimOS/tiger_cowork && NODE_ENV=production PORT=3001 node_modules/.bin/tsx server/index.ts 2>&1 | tee /tmp/tigrimos.log"
+start "TigrimOS Server" /min "%~dp0TigrimOSServer.bat"
 
 echo   Waiting for server to start...
 set TRIES=0
@@ -47,7 +47,7 @@ timeout /t 2 /nobreak >nul
 set /a TRIES+=1
 
 :: Check if server is responding
-powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:3001' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+curl -s -o nul -w "" --connect-timeout 2 --max-time 3 http://localhost:3001 >nul 2>&1
 if %ERRORLEVEL% equ 0 goto :server_ready
 
 if %TRIES% geq 30 (
@@ -67,16 +67,11 @@ echo   TigrimOS is running!
 :open_browser
 echo   Opening TigrimOS...
 echo.
-:: Launch as standalone app window using Edge app mode
-if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
-    start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001 --window-size=1280,800
-) else if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (
-    start "" "C:\Program Files\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001 --window-size=1280,800
-) else (
-    start "" "http://localhost:3001"
-)
+:: Launch as standalone app window using Edge app mode via PowerShell (avoids batch quoting issues)
+powershell -Command "if (Test-Path 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe') { Start-Process 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' -ArgumentList '--app=http://localhost:3001','--window-size=1280,800' } elseif (Test-Path 'C:\Program Files\Microsoft\Edge\Application\msedge.exe') { Start-Process 'C:\Program Files\Microsoft\Edge\Application\msedge.exe' -ArgumentList '--app=http://localhost:3001','--window-size=1280,800' } else { Start-Process 'http://localhost:3001' }"
 
 echo.
 echo   TigrimOS is running. The server runs in the minimized window.
 echo   To stop: close the "TigrimOS Server" window, or run TigrimOSStop.bat
 echo.
+pause

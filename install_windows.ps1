@@ -575,7 +575,8 @@ Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRes
             Start-Sleep -Seconds 1
 
             # Start server in a minimized window — WSL session must stay alive for the server to persist
-            Start-Process -WindowStyle Minimized -FilePath "wsl" -ArgumentList "-d", $WSL_DISTRO, "-u", "root", "--", "bash", "-c", "cd /opt/TigrimOS/tiger_cowork && NODE_ENV=production PORT=3001 node_modules/.bin/tsx server/index.ts 2>&1 | tee /tmp/tigrimos.log"
+            $serverBat = Join-Path (Split-Path -Parent $PSCommandPath) "TigrimOSServer.bat"
+            Start-Process -WindowStyle Minimized -FilePath $serverBat
 
             # Wait for server
             $tries = 0
