@@ -55,12 +55,14 @@ class VMManager: NSObject, ObservableObject {
                 try await createCloudInitSeed()
             }
 
-            // Step 4: Extract kernel and initrd if needed
+            // Step 4: Extract kernel and initrd if needed (Intel only; arm64 uses UEFI from disk)
+            #if !arch(arm64)
             if !FileManager.default.fileExists(atPath: VMConfig.kernelPath.path) ||
                !FileManager.default.fileExists(atPath: VMConfig.initrdPath.path) {
                 appendConsole("[TigrimOS] Downloading kernel and initrd...")
                 try await downloadKernelAndInitrd()
             }
+            #endif
 
             // Step 5: Create and start VM
             state = .starting
@@ -127,15 +129,15 @@ class VMManager: NSObject, ObservableObject {
     func resetVM() async {
         await stopVM()
         // Remove everything so it re-provisions on next start
-        try? FileManager.default.removeItem(at: VMConfig.provisionedMarker)
-        try? FileManager.default.removeItem(at: VMConfig.rawDiskPath)
-        try? FileManager.default.removeItem(at: VMConfig.seedISOPath)
-        try? FileManager.default.removeItem(at: VMConfig.efiStorePath)
-        try? FileManager.default.removeItem(at: VMConfig.machineIdPath)
+        for url in [VMConfig.provisionedMarker, VMConfig.rawDiskPath, VMConfig.seedISOPath,
+                    VMConfig.efiStorePath, VMConfig.machineIdPath, VMConfig.kernelPath,
+                    VMConfig.initrdPath, VMConfig.cloudImagePath] {
+            try? FileManager.default.removeItem(at: url)
+        }
         appendConsole("[TigrimOS] VM reset — will re-download and provision on next start")
     }
 
-    // MARK: - VM Configuration (uses VZLinuxBootLoader for Intel compatibility)
+    // MARK: - VM Configuration
 
     private func createVMConfiguration() throws -> VZVirtualMachineConfiguration {
         let config = VZVirtualMachineConfiguration()
@@ -144,26 +146,47 @@ class VMManager: NSObject, ObservableObject {
         config.cpuCount = VMConfig.cpuCount
         config.memorySize = VMConfig.memorySizeBytes
 
-        // Boot loader — Linux direct boot (works on both Intel and Apple Silicon)
+        // Platform — persist machine identifier so EFI remembers boot state
+        let platform = VZGenericPlatformConfiguration()
+        if FileManager.default.fileExists(atPath: VMConfig.machineIdPath.path),
+           let data = try? Data(contentsOf: VMConfig.machineIdPath),
+           let saved = VZGenericMachineIdentifier(dataRepresentation: data) {
+            platform.machineIdentifier = saved
+        } else {
+            let newId = VZGenericMachineIdentifier()
+            try? newId.dataRepresentation.write(to: VMConfig.machineIdPath)
+            platform.machineIdentifier = newId
+        }
+        config.platform = platform
+
+        // Boot loader
+        #if arch(arm64)
+        // Apple Silicon: UEFI boot — Ubuntu arm64 cloud image has GRUB in its EFI partition.
+        // VZLinuxBootLoader does NOT work on arm64; VZEFIBootLoader is required.
+        let efiVarStore: VZEFIVariableStore
+        if FileManager.default.fileExists(atPath: VMConfig.efiStorePath.path) {
+            efiVarStore = try VZEFIVariableStore(url: VMConfig.efiStorePath)
+        } else {
+            efiVarStore = try VZEFIVariableStore(creatingVariableStoreAt: VMConfig.efiStorePath)
+        }
+        let bootLoader = VZEFIBootLoader()
+        bootLoader.variableStore = efiVarStore
+        config.bootLoader = bootLoader
+        #else
+        // Intel: Linux direct kernel boot
         let kernelURL = VMConfig.kernelPath
         let initrdURL = VMConfig.initrdPath
-
         guard FileManager.default.fileExists(atPath: kernelURL.path) else {
             throw TigrimOSError.provisioningFailed("Kernel not found at \(kernelURL.path)")
         }
         guard FileManager.default.fileExists(atPath: initrdURL.path) else {
             throw TigrimOSError.provisioningFailed("Initrd not found at \(initrdURL.path)")
         }
-
         let bootLoader = VZLinuxBootLoader(kernelURL: kernelURL)
         bootLoader.initialRamdiskURL = initrdURL
-        // Tell the kernel where the root filesystem is and to use serial console
         bootLoader.commandLine = "console=hvc0 root=/dev/vda1 rw quiet"
         config.bootLoader = bootLoader
-
-        // Platform
-        let platform = VZGenericPlatformConfiguration()
-        config.platform = platform
+        #endif
 
         // Storage devices
         var storageDevices: [VZStorageDeviceConfiguration] = []

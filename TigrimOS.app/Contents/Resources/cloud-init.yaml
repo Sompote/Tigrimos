@@ -1,5 +1,5 @@
 #cloud-config
-# TigrimOS VM provisioning — installs Node.js 20, Python 3, and Tiger Cowork
+# TigrimOS VM provisioning — installs Node.js 20, Python 3, and TigrimOS
 
 hostname: tigris
 manage_etc_hosts: true
@@ -34,7 +34,7 @@ runcmd:
   # Install clawhub CLI
   - npm i -g clawhub tsx
 
-  # Setup Tiger Cowork from shared mount
+  # Setup TigrimOS from shared mount
   - mkdir -p /app
   - |
     if mountpoint -q /mnt/tiger-cowork 2>/dev/null; then
@@ -44,11 +44,11 @@ runcmd:
   - cd /app/client && npm install 2>/dev/null || true
   - cd /app/client && npx vite build 2>/dev/null || true
 
-  # Create systemd service for Tiger Cowork
+  # Create systemd service for TigrimOS
   - |
     cat > /etc/systemd/system/tiger-cowork.service << 'UNIT'
     [Unit]
-    Description=Tiger Cowork
+    Description=TigrimOS
     After=network.target
 
     [Service]
