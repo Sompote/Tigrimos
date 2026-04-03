@@ -163,6 +163,7 @@ Click **Test Connection** in Settings. If it succeeds, you're ready to chat.
 - **AI Chat with 16 Built-in Tools** — web search, Python, React, shell, files, skills, sub-agents
 - **Mix Any Model per Agent** — assign different AI providers per agent (API, Claude Code CLI, Codex CLI)
 - **Parallel Multi-Agent System** — 7 orchestration topologies, 4 communication protocols, P2P swarm governance
+- **Built-in Terminal** — full xterm.js terminal with root access to the Ubuntu sandbox (install packages, manage services, run CLI tools)
 - **Minecraft Task Monitor** — live pixel-art characters with speech bubbles showing agent activity
 - **Long-Running Session Stability** — sliding window compression, smart tool result handling, checkpoint recovery
 - **MCP Integration** — connect any Model Context Protocol server (Stdio, SSE, StreamableHTTP)
@@ -170,6 +171,57 @@ Click **Test Connection** in Settings. If it succeeds, you're ready to chat.
 - **Skills & ClawHub** — install AI skills from the marketplace or build your own
 - **Projects** — dedicated workspaces with memory, skill selection, and file browser
 - **Cross-Platform** — native macOS app + Windows WSL2 installer
+
+## Sandbox Terminal
+
+TigrimOS includes a built-in terminal (**Settings → Terminal**) that gives you root access to the Ubuntu sandbox. It runs a real PTY with full color, tab completion, and cursor support via xterm.js.
+
+Use the terminal to install additional tools, manage services, or debug the sandbox environment.
+
+### First-Time Setup: Claude Code CLI
+
+To use **Claude Code** as an agent provider, install it once via the terminal:
+
+1. Go to **Settings → Terminal → Open Terminal**
+2. Run:
+   ```bash
+   npm i -g @anthropic-ai/claude-code
+   ln -sf /root/.local/bin/claude /usr/local/bin/claude
+   ```
+3. Set your API key:
+   ```bash
+   export ANTHROPIC_API_KEY=sk-ant-...
+   echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> /root/.bashrc
+   ```
+4. Test it:
+   ```bash
+   claude --version
+   ```
+
+Claude Code is now available as an agent type in the Agent Editor.
+
+### First-Time Setup: Codex CLI
+
+To use **OpenAI Codex CLI** as an agent provider:
+
+1. Go to **Settings → Terminal → Open Terminal**
+2. Run:
+   ```bash
+   npm i -g @openai/codex
+   ```
+3. Set your API key:
+   ```bash
+   export OPENAI_API_KEY=sk-...
+   echo 'export OPENAI_API_KEY=sk-...' >> /root/.bashrc
+   ```
+4. Test it:
+   ```bash
+   codex --version
+   ```
+
+Codex CLI is now available as an agent type in the Agent Editor.
+
+> **Note:** These CLI tools are installed **inside the sandbox** — they cannot access your host system. API keys stored in the sandbox are isolated from your host environment.
 
 ## Security Model
 
