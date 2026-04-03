@@ -68,7 +68,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           minWidth: 340, boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
         }}>
           <h2 style={{ color: "#f1f5f9", margin: "0 0 0.5rem", fontSize: "1.4rem" }}>
-            Tiger Cowork
+            TigrimOS
           </h2>
           <p style={{ color: "#64748b", margin: "0 0 1.5rem", fontSize: "0.9rem" }}>
             Enter access token to continue

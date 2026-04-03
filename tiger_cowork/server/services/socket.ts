@@ -188,7 +188,7 @@ MANUAL SUB-AGENT MODE: Delegate ALL tasks via spawn_subagent with agentId matchi
 SUB-AGENTS: Use spawn_subagent for complex multi-part tasks. Each sub-agent runs independently with full tool access.`;
   }
 
-  return `You are Tiger Cowork, an AI assistant with tools for search, code execution, files, and skills.
+  return `You are TigrimOS, an AI assistant with tools for search, code execution, files, and skills.
 ${delegationRules}
 
 Rules:

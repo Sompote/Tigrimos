@@ -702,7 +702,7 @@ export default function ChatPage() {
         </button>
         {!activeSession && messages.length === 0 ? (
           <div className="chat-empty">
-            <h1>Tiger Cowork</h1>
+            <h1>TigrimOS</h1>
             <p>Start a conversation to get help with coding, run Python, manage files, and more.</p>
             <div className="chat-suggestions">
               {["Write a Python script to generate a PDF report", "Help me analyze a CSV file", "Build a React dashboard with charts", "Create a web scraper"].map((s) => (
@@ -809,7 +809,7 @@ export default function ChatPage() {
             <textarea
               ref={textareaRef}
               className="chat-input"
-              placeholder="Message Tiger Cowork..."
+              placeholder="Message TigrimOS..."
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
