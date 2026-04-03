@@ -1330,7 +1330,10 @@ export async function runClaudeCodeAgent(
   return new Promise((resolve, reject) => {
     const child = spawnChild("claude", cliArgs, {
       cwd: workDir,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        PATH: `/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/venv/bin:${process.env.PATH || ""}`,
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -1511,7 +1514,10 @@ export async function runCodexAgent(
   return new Promise((resolve, reject) => {
     const child = spawnChild("codex", cliArgs, {
       cwd: workDir,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        PATH: `/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/venv/bin:${process.env.PATH || ""}`,
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
