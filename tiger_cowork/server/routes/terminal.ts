@@ -12,13 +12,20 @@ export function setupTerminalSocket(io: Server) {
         activeShell.kill();
       }
 
-      const shell = spawn("/bin/bash", ["-l"], {
+      // Use sudo bash so users can install packages, manage services, etc.
+      // The tigris user has NOPASSWD sudo configured by cloud-init.
+      const useRoot = process.getuid?.() !== 0;
+      const cmd = useRoot ? "sudo" : "/bin/bash";
+      const args = useRoot ? ["/bin/bash", "-l"] : ["-l"];
+
+      const shell = spawn(cmd, args, {
         cwd: process.env.SANDBOX_DIR || process.cwd(),
         env: {
           ...process.env,
           TERM: "xterm-256color",
           COLUMNS: "120",
           LINES: "30",
+          HOME: useRoot ? "/root" : (process.env.HOME || "/home/tigris"),
         },
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -82,11 +89,18 @@ export async function terminalRoutes(fastify: FastifyInstance) {
     if (!command) return { error: "No command provided" };
 
     return new Promise((resolve) => {
-      const proc = spawn("/bin/bash", ["-c", command], {
-        cwd: process.env.SANDBOX_DIR || process.cwd(),
-        env: { ...process.env, TERM: "dumb" },
-        timeout: 30000,
-      });
+      const useRoot = process.getuid?.() !== 0;
+      const proc = useRoot
+        ? spawn("sudo", ["/bin/bash", "-c", command], {
+            cwd: process.env.SANDBOX_DIR || process.cwd(),
+            env: { ...process.env, TERM: "dumb" },
+            timeout: 30000,
+          })
+        : spawn("/bin/bash", ["-c", command], {
+            cwd: process.env.SANDBOX_DIR || process.cwd(),
+            env: { ...process.env, TERM: "dumb" },
+            timeout: 30000,
+          });
 
       let stdout = "";
       let stderr = "";

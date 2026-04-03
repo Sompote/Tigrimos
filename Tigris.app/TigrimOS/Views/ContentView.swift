@@ -14,9 +14,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // Top bar
             HStack {
-                Image(systemName: "pawprint.fill")
-                    .foregroundColor(.orange)
-                    .font(.title2)
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 28, height: 28)
                 Text("TigrimOS")
                     .font(.title2.bold())
 

@@ -5,7 +5,10 @@ struct SettingsView: View {
     @AppStorage("cpuCount") private var cpuCount = 4
     @AppStorage("memoryGB") private var memoryGB = 4
     @AppStorage("autoStart") private var autoStart = false
+    @AppStorage("vmStoragePath") private var vmStoragePath = ""
     @State private var showResetAlert = false
+    @State private var showMoveAlert = false
+    @State private var pendingStoragePath = ""
 
     var body: some View {
         TabView {
@@ -29,6 +32,60 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
+                Section("VM Storage") {
+                    LabeledContent("Location") {
+                        Text(VMConfig.appSupportDir.path)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                    }
+
+                    HStack {
+                        Button("Change Location...") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseFiles = false
+                            panel.canChooseDirectories = true
+                            panel.canCreateDirectories = true
+                            panel.allowsMultipleSelection = false
+                            panel.prompt = "Select VM Storage Folder"
+                            panel.message = "Choose where to store the VM disk image and related files."
+
+                            if panel.runModal() == .OK, let url = panel.url {
+                                let newPath = url.appendingPathComponent("TigrimOS", isDirectory: true).path
+                                pendingStoragePath = newPath
+                                showMoveAlert = true
+                            }
+                        }
+
+                        if !vmStoragePath.isEmpty {
+                            Button("Reset to Default") {
+                                pendingStoragePath = ""
+                                showMoveAlert = true
+                            }
+                            .foregroundColor(.orange)
+                        }
+                    }
+
+                    LabeledContent("Disk Image") {
+                        Text(VMConfig.rawDiskPath.lastPathComponent)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    LabeledContent("Disk Usage") {
+                        Text(VMConfig.diskUsage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    LabeledContent("Max Disk Size") {
+                        Text("\(VMConfig.diskSizeGB) GB")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 Section("Startup") {
                     Toggle("Start VM automatically on launch", isOn: $autoStart)
                 }
@@ -41,14 +98,6 @@ struct SettingsView: View {
 
                     Button("Open VM Storage in Finder") {
                         NSWorkspace.shared.open(VMConfig.appSupportDir)
-                    }
-
-                    HStack {
-                        Text("Storage location:")
-                        Text(VMConfig.appSupportDir.path)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .textSelection(.enabled)
                     }
                 }
             }
@@ -94,9 +143,17 @@ struct SettingsView: View {
 
             // About
             VStack(spacing: 16) {
-                Image(systemName: "pawprint.fill")
-                    .font(.system(size: 64))
-                    .foregroundColor(.orange)
+                if let iconImage = NSImage(named: "AppIcon") {
+                    Image(nsImage: iconImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 96, height: 96)
+                } else {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 96, height: 96)
+                }
 
                 Text("TigrimOS")
                     .font(.largeTitle.bold())
@@ -111,7 +168,7 @@ struct SettingsView: View {
                     .frame(width: 200)
 
                 VStack(spacing: 8) {
-                    Text("TigrimOS v0.4.3")
+                    Text("TigrimOS Swarm Agents")
                     Text("Ubuntu 22.04 VM via Virtualization.framework")
                     Text("Node.js 20 + Python 3 + Fastify")
                 }
@@ -126,7 +183,7 @@ struct SettingsView: View {
                 Label("About", systemImage: "info.circle")
             }
         }
-        .frame(width: 500, height: 400)
+        .frame(width: 500, height: 420)
         .alert("Reset VM?", isPresented: $showResetAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {
@@ -134,6 +191,27 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will stop the VM and re-provision it on next start. Your shared folder configurations will be preserved.")
+        }
+        .alert("Change VM Storage?", isPresented: $showMoveAlert) {
+            Button("Cancel", role: .cancel) {
+                pendingStoragePath = ""
+            }
+            Button("Change & Restart", role: .destructive) {
+                VMConfig.setStoragePath(pendingStoragePath.isEmpty ? nil : pendingStoragePath)
+                vmStoragePath = pendingStoragePath
+                pendingStoragePath = ""
+                // Ensure new directory exists
+                try? FileManager.default.createDirectory(
+                    at: VMConfig.appSupportDir,
+                    withIntermediateDirectories: true
+                )
+            }
+        } message: {
+            if pendingStoragePath.isEmpty {
+                Text("Reset storage to default location?\n\n\(VMConfig.defaultAppSupportDir.path)\n\nExisting VM files at the custom location will not be deleted. You need to restart the app after changing.")
+            } else {
+                Text("Change VM storage to:\n\n\(pendingStoragePath)\n\nExisting VM files will not be moved automatically. You can manually move them or let TigrimOS re-download on next start. You need to restart the app after changing.")
+            }
         }
     }
 }

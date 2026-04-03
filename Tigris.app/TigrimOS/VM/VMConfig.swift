@@ -2,32 +2,50 @@ import Foundation
 
 /// All VM and app configuration constants
 struct VMConfig {
-    /// Application support directory for TigrimOS
-    static let appSupportDir: URL = {
+    /// Default Application Support directory
+    static let defaultAppSupportDir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("TigrimOS", isDirectory: true)
     }()
 
+    /// Custom storage path (persisted in UserDefaults)
+    static var appSupportDir: URL {
+        if let custom = UserDefaults.standard.string(forKey: "vmStoragePath"),
+           !custom.isEmpty {
+            return URL(fileURLWithPath: custom, isDirectory: true)
+        }
+        return defaultAppSupportDir
+    }
+
+    /// Set a custom storage path
+    static func setStoragePath(_ path: String?) {
+        if let path = path, !path.isEmpty {
+            UserDefaults.standard.set(path, forKey: "vmStoragePath")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "vmStoragePath")
+        }
+    }
+
     /// Where the raw disk image lives (converted from QCOW2)
-    static let rawDiskPath: URL = appSupportDir.appendingPathComponent("ubuntu-raw.img")
+    static var rawDiskPath: URL { appSupportDir.appendingPathComponent("ubuntu-raw.img") }
 
     /// Where the QCOW2 cloud image is cached
-    static let cloudImagePath: URL = appSupportDir.appendingPathComponent("ubuntu-cloud.qcow2")
+    static var cloudImagePath: URL { appSupportDir.appendingPathComponent("ubuntu-cloud.qcow2") }
 
     /// Where the kernel (vmlinuz) lives
-    static let kernelPath: URL = appSupportDir.appendingPathComponent("vmlinuz")
+    static var kernelPath: URL { appSupportDir.appendingPathComponent("vmlinuz") }
 
     /// Where the initrd lives
-    static let initrdPath: URL = appSupportDir.appendingPathComponent("initrd")
+    static var initrdPath: URL { appSupportDir.appendingPathComponent("initrd") }
 
     /// Cloud-init seed ISO
-    static let seedISOPath: URL = appSupportDir.appendingPathComponent("seed.img")
+    static var seedISOPath: URL { appSupportDir.appendingPathComponent("seed.img") }
 
     /// EFI variable store (kept for compatibility)
-    static let efiStorePath: URL = appSupportDir.appendingPathComponent("efi_vars.fd")
+    static var efiStorePath: URL { appSupportDir.appendingPathComponent("efi_vars.fd") }
 
     /// Machine identifier
-    static let machineIdPath: URL = appSupportDir.appendingPathComponent("machine_id.bin")
+    static var machineIdPath: URL { appSupportDir.appendingPathComponent("machine_id.bin") }
 
     /// Shared folder on host (user-controlled)
     static let defaultSharedDir: URL = {
@@ -47,11 +65,23 @@ struct VMConfig {
     static let hostForwardPort: Int = 3001
 
     /// Provisioning marker
-    static let provisionedMarker: URL = appSupportDir.appendingPathComponent(".provisioned")
+    static var provisionedMarker: URL { appSupportDir.appendingPathComponent(".provisioned") }
 
     /// Check if VM has been set up
     static var isProvisioned: Bool {
         FileManager.default.fileExists(atPath: provisionedMarker.path)
+    }
+
+    /// Disk size of raw image in human-readable format
+    static var diskUsage: String {
+        let path = rawDiskPath.path
+        guard FileManager.default.fileExists(atPath: path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? UInt64 else {
+            return "Not created"
+        }
+        let gb = Double(size) / (1024 * 1024 * 1024)
+        return String(format: "%.1f GB", gb)
     }
 
     /// Ensure app support directory exists
