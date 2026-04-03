@@ -86,26 +86,28 @@ swift build -c release
 
 1. Download or clone the repository
 2. Double-click **`TigrimOSInstaller.bat`**
-3. The installer will:
-   - Enable WSL2 (may ask for a restart on first run)
-   - Install Ubuntu 22.04 as a dedicated "TigrimOS" WSL distribution
-   - Install Node.js 20 + Python 3 inside the sandbox
-   - Clone, build, and start TigrimOS
-4. A desktop shortcut **TigrimOS** is created automatically
+3. The graphical installer will guide you through:
+   - Enabling WSL2 (may require a one-time restart)
+   - Installing Ubuntu 22.04 as a dedicated "TigrimOS" WSL2 distribution
+   - Installing Node.js 20 + Python 3 inside the sandbox
+   - Optionally connecting a shared folder (can also be done later from the app)
+   - Cloning, building, and starting TigrimOS
+4. TigrimOS opens as a **standalone desktop window** (Edge app mode — no browser tabs or address bar)
+5. A desktop shortcut **TigrimOS** is created automatically
 
-After installation, use **`TigrimOSStart.bat`** to launch and **`TigrimOSStop.bat`** to stop.
+After installation, use **`TigrimOSStart.bat`** (or the desktop shortcut) to launch and **`TigrimOSStop.bat`** to stop.
 
 ## Quick Start
 
 1. **Launch** TigrimOS
    - **macOS:** Open the app — the setup wizard runs on first launch
-   - **Windows:** Double-click `TigrimOSStart.bat` (or the desktop shortcut)
+   - **Windows:** Double-click `TigrimOSStart.bat` or the desktop shortcut — opens as a standalone app window
 2. **Wait** for the Ubuntu sandbox to provision (~5-10 minutes on first launch)
 3. **Open Settings** → enter your API Key, API URL, and Model
 4. **Click Test Connection** to verify
 5. **Start chatting** — the AI can search the web, run code, generate charts, and more
 
-Subsequent launches start in ~30 seconds (no re-download).
+Subsequent launches start in under a minute (no re-download).
 
 ## Connect a Local LLM (Ollama, llama.cpp, LM Studio)
 
@@ -177,8 +179,8 @@ TigrimOS runs inside a full sandbox on both platforms:
 |-------|-------|---------|
 | **Sandbox** | Ubuntu 22.04 VM via Virtualization.framework | Ubuntu 22.04 via WSL2 |
 | **File System** | Host files **invisible** by default | Host files **invisible** by default |
-| **Shared Folders** | VirtioFS opt-in, read-only default | Symlink opt-in via installer |
-| **Write Access** | Requires explicit per-folder toggle | Requires explicit configuration |
+| **Shared Folders** | VirtioFS opt-in, read-only default | Symlink opt-in via installer or app UI |
+| **Write Access** | Requires explicit per-folder toggle | Read & write by default (Windows folder permissions apply) |
 | **Network** | NAT — VM isolated from host network | WSL2 NAT — isolated from host network |
 | **Process Isolation** | VM processes cannot see host processes | WSL2 processes isolated from Windows |
 
@@ -194,10 +196,26 @@ By default the VM has **zero access** to your Mac's files. To share a folder:
 
 ### Shared Folders (Windows)
 
-During installation, you can optionally choose a folder to share. It appears inside WSL2 at `/mnt/shared/host`. You can also manually mount Windows folders:
+There are two ways to connect Windows folders to the sandbox:
+
+**From the app (recommended):**
+
+1. Open the **Files** page in TigrimOS
+2. Click **Connect Folder**
+3. Enter the Windows path (e.g. `C:\Users\YOU\Documents`)
+4. Optionally give it a display name
+5. Click **Connect** — the folder appears under `shared/` in the file browser
+
+To disconnect: navigate to `shared/`, click the **x** on the linked folder.
+
+**During installation:**
+
+The installer optionally lets you pick a shared folder. It is linked into the sandbox automatically.
+
+**Manual (command line):**
 
 ```powershell
-wsl -d TigrimOS -- bash -c "ln -sf /mnt/c/Users/YOU/Documents /mnt/shared/docs"
+wsl -d TigrimOS -u root -- bash -c "mkdir -p /opt/TigrimOS/tiger_cowork/shared && ln -sf /mnt/c/Users/YOU/Documents /opt/TigrimOS/tiger_cowork/shared/docs"
 ```
 
 ## Architecture
@@ -239,7 +257,7 @@ wsl -d TigrimOS -- bash -c "ln -sf /mnt/c/Users/YOU/Documents /mnt/shared/docs"
 │            TigrimOSStart.bat (Windows)           │
 │                                                  │
 │  ┌────────────────────────────────────────────┐  │
-│  │      Browser → http://localhost:3001       │  │
+│  │   Edge App Window → http://localhost:3001  │  │
 │  └────────────────┬───────────────────────────┘  │
 │                   │                              │
 │  ┌────────────────▼───────────────────────────┐  │
@@ -254,11 +272,11 @@ wsl -d TigrimOS -- bash -c "ln -sf /mnt/c/Users/YOU/Documents /mnt/shared/docs"
 │  │  │   ├── Python 3 + numpy/pandas/...   │  │  │
 │  │  │   └── 16 built-in AI tools          │  │  │
 │  │  │                                      │  │  │
-│  │  │   /mnt/shared/ ← symlink (opt-in)  │  │  │
+│  │  │   shared/ ← symlinks to Windows (opt-in) │  │  │
 │  │  └──────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────┘  │
 │                                                  │
-│  C:\Users\YOU\SharedFolder (optional)            │
+│  C:\Users\YOU\Documents (connected via app UI)   │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -282,9 +300,14 @@ wsl -d TigrimOS -- bash -c "ln -sf /mnt/c/Users/YOU/Documents /mnt/shared/docs"
 
 | Script | Action |
 |--------|--------|
-| **TigrimOSStart.bat** | Start the WSL2 server and open browser |
+| **TigrimOSStart.bat** | Start the WSL2 server and open as a standalone app window |
 | **TigrimOSStop.bat** | Stop the TigrimOS server |
 | **TigrimOSInstaller.bat** | Re-run installer (update or repair) |
+
+| In-App Feature | Description |
+|----------------|-------------|
+| **Files → Connect Folder** | Link a Windows folder into the sandbox for reading/writing |
+| **Files → shared/** | Browse and manage all connected Windows folders |
 
 ## Troubleshooting
 
@@ -326,15 +349,25 @@ Run `TigrimOSInstaller.bat` — it enables WSL2 automatically. You may need to r
 **Installer says "restart required"**
 WSL2 requires a one-time Windows restart after enabling. Restart and run the installer again.
 
+**Installer fails with PowerShell errors**
+The installer requires PowerShell 5.1+ (included with Windows 10). If you see parse errors, make sure you are running the latest Windows updates.
+
 **Server doesn't start**
 Check the log inside WSL:
 ```powershell
-wsl -d TigrimOS -- cat /tmp/tigrimos.log
+wsl -d TigrimOS -u root -- cat /tmp/tigrimos.log
 ```
+
+**App window doesn't open (but server is running)**
+TigrimOS opens as an Edge app-mode window. If Edge is not installed, it falls back to your default browser. You can always access TigrimOS at `http://localhost:3001`.
+
+**Connected folder not visible in file browser**
+Connected folders appear under `shared/` in the file browser. Navigate to the `shared` directory to see linked Windows folders.
 
 **How to reset everything (Windows)**
 ```powershell
 wsl --unregister TigrimOS
+wsl --unregister Ubuntu-22.04
 ```
 Then run `TigrimOSInstaller.bat` again.
 

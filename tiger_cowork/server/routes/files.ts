@@ -180,6 +180,74 @@ export async function filesRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // List connected shared folders
+  fastify.get("/shared-folders", async (request, reply) => {
+    try {
+      const sharedDir = path.join(request.server.sandboxDir, "shared");
+      if (!fs.existsSync(sharedDir)) return [];
+      const entries = fs.readdirSync(sharedDir, { withFileTypes: true });
+      return entries.map((e) => {
+        let target = "";
+        const fullPath = path.join(sharedDir, e.name);
+        try { target = fs.readlinkSync(fullPath); } catch {}
+        return { name: e.name, target, isSymlink: e.isSymbolicLink() };
+      });
+    } catch (err: any) {
+      reply.code(500); return { error: err.message };
+    }
+  });
+
+  // Connect a host folder into the sandbox
+  fastify.post("/shared-folders", async (request, reply) => {
+    try {
+      const { hostPath, name } = request.body as any;
+      if (!hostPath) { reply.code(400); return { error: "hostPath required" }; }
+
+      // On WSL, Windows paths are at /mnt/c/..., /mnt/d/... etc.
+      // Accept both Windows-style (C:\Users\...) and WSL-style (/mnt/c/...) paths
+      let wslPath = hostPath;
+      const winMatch = hostPath.match(/^([A-Za-z]):[\\\/](.*)/);
+      if (winMatch) {
+        const drive = winMatch[1].toLowerCase();
+        const rest = winMatch[2].replace(/\\/g, "/");
+        wslPath = `/mnt/${drive}/${rest}`;
+      }
+
+      // Verify path exists
+      if (!fs.existsSync(wslPath)) {
+        reply.code(400); return { error: `Path not found: ${wslPath}` };
+      }
+
+      const folderName = name || path.basename(wslPath);
+      const sharedDir = path.join(request.server.sandboxDir, "shared");
+      if (!fs.existsSync(sharedDir)) fs.mkdirSync(sharedDir, { recursive: true });
+
+      const linkPath = path.join(sharedDir, folderName);
+      if (fs.existsSync(linkPath)) {
+        try { fs.unlinkSync(linkPath); } catch {}
+      }
+      fs.symlinkSync(wslPath, linkPath);
+      return { success: true, name: folderName, target: wslPath };
+    } catch (err: any) {
+      reply.code(500); return { error: err.message };
+    }
+  });
+
+  // Disconnect a shared folder
+  fastify.delete("/shared-folders", async (request, reply) => {
+    try {
+      const name = (request.query as any).name as string;
+      if (!name) { reply.code(400); return { error: "name required" }; }
+      const linkPath = path.join(request.server.sandboxDir, "shared", name);
+      if (fs.existsSync(linkPath)) {
+        fs.unlinkSync(linkPath);
+      }
+      return { success: true };
+    } catch (err: any) {
+      reply.code(500); return { error: err.message };
+    }
+  });
+
   // Download
   fastify.get("/download", async (request, reply) => {
     try {

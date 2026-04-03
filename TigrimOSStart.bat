@@ -37,7 +37,7 @@ timeout /t 1 /nobreak >nul
 echo   Starting TigrimOS server...
 echo.
 
-wsl -d TigrimOS -- bash -c "cd /opt/TigrimOS/tiger_cowork && export NODE_ENV=production && export PORT=3001 && npx tsx server/index.ts >> /tmp/tigrimos.log 2>&1 &"
+start /b "" wsl -d TigrimOS -u root -- bash -c "cd /opt/TigrimOS/tiger_cowork && NODE_ENV=production PORT=3001 node_modules/.bin/tsx server/index.ts >> /tmp/tigrimos.log 2>&1"
 
 echo   Waiting for server to start...
 set TRIES=0
@@ -65,9 +65,16 @@ echo.
 echo   TigrimOS is running!
 
 :open_browser
-echo   Opening browser at http://localhost:3001
+echo   Opening TigrimOS...
 echo.
-start "" "http://localhost:3001"
+:: Launch as standalone app window using Edge app mode
+if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
+    start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001 --window-size=1280,800
+) else if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (
+    start "" "C:\Program Files\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:3001 --window-size=1280,800
+) else (
+    start "" "http://localhost:3001"
+)
 
 echo   TigrimOS is running in background.
 echo   To stop: wsl -d TigrimOS -- pkill -f "node.*server"

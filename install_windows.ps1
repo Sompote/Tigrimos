@@ -1,5 +1,5 @@
 # TigrimOS - Windows Installer (PowerShell + WPF)
-# Uses WSL2 Ubuntu as sandbox — matching macOS Virtualization.framework approach
+# Uses WSL2 Ubuntu as sandbox - matching macOS Virtualization.framework approach
 # No Docker required
 
 param(
@@ -67,7 +67,7 @@ $welcomeXaml = @"
                 <TextBlock Text="&#x1F42F;" FontSize="56" HorizontalAlignment="Center" Margin="0,0,0,8"/>
                 <TextBlock Text="TigrimOS" FontSize="26" FontWeight="Bold" Foreground="White"
                            HorizontalAlignment="Center" Margin="0,0,0,2"/>
-                <TextBlock Text="v1.0.0 — Windows Installer" FontSize="13" Foreground="#80FFFFFF"
+                <TextBlock Text="v1.0.0 - Windows Installer" FontSize="13" Foreground="#80FFFFFF"
                            HorizontalAlignment="Center" Margin="0,0,0,24"/>
 
                 <!-- Description -->
@@ -84,7 +84,7 @@ $welcomeXaml = @"
                 <TextBlock Foreground="#AAe2e8f0" FontSize="13" Margin="16,0,0,20" Text="&#x2022; Build and start TigrimOS"/>
 
                 <!-- Shared folder (optional) -->
-                <TextBlock Text="Shared folder (optional — VM can access this folder):" Foreground="#CCe2e8f0" FontSize="13" Margin="0,0,0,6"/>
+                <TextBlock Text="Shared folder (optional - VM can access this folder):" Foreground="#CCe2e8f0" FontSize="13" Margin="0,0,0,6"/>
                 <Grid Margin="0,0,0,20">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -420,7 +420,7 @@ Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRes
             } catch {}
 
             if (-not $distroExists) {
-                Update-ProgressInner 2 7 "Installing Ubuntu 22.04..." "Downloading — this may take a few minutes"
+                Update-ProgressInner 2 7 "Installing Ubuntu 22.04..." "Downloading - this may take a few minutes"
 
                 # Install Ubuntu 22.04 as a custom named distro
                 # First install Ubuntu, then export/import with our name
@@ -435,7 +435,7 @@ Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRes
                     wsl --install -d Ubuntu-22.04 --no-launch *>> $LOG_FILE
 
                     # Initialize with default user
-                    $initScript = "useradd -m -s /bin/bash tigrimos && echo 'tigrimos:tigrimos' | chpasswd && usermod -aG sudo tigrimos && echo 'tigrimos ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers"
+                    $initScript = 'useradd -m -s /bin/bash tigrimos && echo ''tigrimos:tigrimos'' | chpasswd && usermod -aG sudo tigrimos && echo ''tigrimos ALL=(ALL) NOPASSWD:ALL'' >> /etc/sudoers'
                     wsl -d Ubuntu-22.04 -- bash -c $initScript *>> $LOG_FILE
                 }
 
@@ -462,7 +462,7 @@ Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRes
                 }
 
                 # Set default user
-                wsl -d $WSL_DISTRO -- bash -c "echo '[user]' > /etc/wsl.conf && echo 'default=tigrimos' >> /etc/wsl.conf" *>> $LOG_FILE
+                wsl -d $WSL_DISTRO -- bash -c 'echo ''[user]'' > /etc/wsl.conf && echo ''default=tigrimos'' >> /etc/wsl.conf' *>> $LOG_FILE
             }
 
             # ============================================================
@@ -470,15 +470,15 @@ Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRes
             # ============================================================
             Update-ProgressInner 3 7 "Downloading TigrimOS..." "Cloning repository into sandbox"
 
-            $repoExists = wsl -d $WSL_DISTRO -- bash -c "test -d /opt/TigrimOS/.git && echo yes || echo no" 2>&1
+            $repoExists = wsl -d $WSL_DISTRO -- bash -c 'test -d /opt/TigrimOS/.git && echo yes || echo no' 2>&1
             if ($repoExists -match "yes") {
                 Update-ProgressInner 3 7 "Updating TigrimOS..." "Pulling latest changes"
-                wsl -d $WSL_DISTRO -- bash -c "cd /opt/TigrimOS && git pull" *>> $LOG_FILE
+                wsl -d $WSL_DISTRO -- bash -c 'cd /opt/TigrimOS && git pull' *>> $LOG_FILE
             } else {
                 # Install git inside WSL if needed
-                wsl -d $WSL_DISTRO -- bash -c "which git >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq git)" *>> $LOG_FILE
+                wsl -d $WSL_DISTRO -u root -- bash -c 'which git >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq git)' *>> $LOG_FILE
 
-                wsl -d $WSL_DISTRO -- bash -c "rm -rf /opt/TigrimOS && git clone $REPO_URL /opt/TigrimOS" *>> $LOG_FILE
+                wsl -d $WSL_DISTRO -u root -- bash -c ('rm -rf /opt/TigrimOS && git clone ' + $REPO_URL + ' /opt/TigrimOS') *>> $LOG_FILE
                 if ($LASTEXITCODE -ne 0) {
                     Show-Error "Failed to clone TigrimOS. Check your internet connection.`nLog: $LOG_FILE"
                     $progressWindow.Dispatcher.Invoke([Action]{ $progressWindow.Close() })
@@ -487,29 +487,33 @@ Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRes
             }
 
             # Set ownership
-            wsl -d $WSL_DISTRO -- bash -c "chown -R tigrimos:tigrimos /opt/TigrimOS" *>> $LOG_FILE
+            wsl -d $WSL_DISTRO -u root -- bash -c "chown -R tigrimos:tigrimos /opt/TigrimOS" *>> $LOG_FILE
 
             # ============================================================
             # STEP 4: Install Node.js 20
             # ============================================================
             Update-ProgressInner 4 7 "Installing Node.js 20..." "Setting up Node.js inside sandbox"
 
-            $nodeInstalled = wsl -d $WSL_DISTRO -- bash -c "node --version 2>/dev/null | grep -q 'v20' && echo yes || echo no" 2>&1
+            $nodeInstalled = wsl -d $WSL_DISTRO -- bash -c 'node --version 2>/dev/null | grep -q ''v20'' && echo yes || echo no' 2>&1
             if ($nodeInstalled -match "yes") {
                 Update-ProgressInner 4 7 "Node.js 20" "Already installed"
                 Start-Sleep -Milliseconds 500
             } else {
-                wsl -d $WSL_DISTRO -- bash -c @"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq curl ca-certificates gnupg
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main' > /etc/apt/sources.list.d/nodesource.list
-apt-get update -qq
-apt-get install -y -qq nodejs
-npm install -g npm@latest
-"@ *>> $LOG_FILE
+                # Clean up any malformed files from previous installs
+                wsl -d $WSL_DISTRO -u root -- bash -c 'rm -f /etc/apt/sources.list.d/nodesource.list*' 2>$null
+                $nodeScript = @(
+                    'set -e'
+                    'export DEBIAN_FRONTEND=noninteractive'
+                    'apt-get update -qq'
+                    'apt-get install -y -qq curl ca-certificates gnupg'
+                    'mkdir -p /etc/apt/keyrings'
+                    'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg'
+                    'echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list'
+                    'apt-get update -qq'
+                    'apt-get install -y -qq nodejs'
+                    'npm install -g npm@latest'
+                ) -join "`n"
+                $nodeScript | wsl -d $WSL_DISTRO -u root -- bash -c 'tr -d ''\015'' | bash' *>> $LOG_FILE
 
                 if ($LASTEXITCODE -ne 0) {
                     Show-Error "Failed to install Node.js. Check log: $LOG_FILE"
@@ -523,22 +527,25 @@ npm install -g npm@latest
             # ============================================================
             Update-ProgressInner 5 7 "Installing Python..." "Setting up Python 3 + packages"
 
-            wsl -d $WSL_DISTRO -- bash -c @"
-export DEBIAN_FRONTEND=noninteractive
-apt-get install -y -qq python3 python3-pip python3-venv
-pip3 install numpy pandas matplotlib scipy 2>/dev/null || true
-"@ *>> $LOG_FILE
+            $pythonScript = @(
+                'export DEBIAN_FRONTEND=noninteractive'
+                'apt-get install -y -qq python3 python3-pip python3-venv'
+                'pip3 install numpy pandas matplotlib scipy 2>/dev/null || true'
+            ) -join "`n"
+            $pythonScript | wsl -d $WSL_DISTRO -u root -- bash -c 'tr -d ''\015'' | bash' *>> $LOG_FILE
 
             # ============================================================
             # STEP 6: Build TigrimOS
             # ============================================================
             Update-ProgressInner 6 7 "Building TigrimOS..." "Installing dependencies and building"
 
-            wsl -d $WSL_DISTRO -- bash -c @"
-cd /opt/TigrimOS/tiger_cowork
-npm install 2>&1
-cd client && npm install 2>&1 && npm run build 2>&1
-"@ *>> $LOG_FILE
+            $buildScript = @(
+                'set -e'
+                'cd /opt/TigrimOS/tiger_cowork'
+                'npm install'
+                'cd client && npm install && npm run build'
+            ) -join "`n"
+            $buildScript | wsl -d $WSL_DISTRO -u root -- bash -c 'tr -d ''\015'' | bash' *>> $LOG_FILE
 
             if ($LASTEXITCODE -ne 0) {
                 Show-Error "Failed to build TigrimOS. Check log: $LOG_FILE"
@@ -546,22 +553,17 @@ cd client && npm install 2>&1 && npm run build 2>&1
                 return
             }
 
-            # Configure shared folder if provided
+            # Configure shared folder if provided — symlink INSIDE sandbox so file browser can see it
             if ($sharedFolder -and (Test-Path $sharedFolder)) {
                 $wslPath = $sharedFolder -replace '\\', '/' -replace '^([A-Za-z]):', '/mnt/$1'
                 $wslPath = $wslPath.Substring(0,5).ToLower() + $wslPath.Substring(5)
-                wsl -d $WSL_DISTRO -- bash -c "mkdir -p /mnt/shared && ln -sf '$wslPath' /mnt/shared/host" *>> $LOG_FILE
+                $folderName = Split-Path $sharedFolder -Leaf
+                ('mkdir -p /opt/TigrimOS/tiger_cowork/shared && ln -sf "' + $wslPath + '" "/opt/TigrimOS/tiger_cowork/shared/' + $folderName + '"') | wsl -d $WSL_DISTRO -u root -- bash -c 'tr -d ''\015'' | bash' *>> $LOG_FILE
             }
 
             # Create .env
-            wsl -d $WSL_DISTRO -- bash -c @"
-cat > /opt/TigrimOS/tiger_cowork/.env << 'ENVEOF'
-PORT=3001
-NODE_ENV=production
-SANDBOX_DIR=/opt/TigrimOS/tiger_cowork
-ACCESS_TOKEN=
-ENVEOF
-"@ *>> $LOG_FILE
+            $envScript = 'printf "PORT=3001\nNODE_ENV=production\nSANDBOX_DIR=/opt/TigrimOS/tiger_cowork\nACCESS_TOKEN=\n" > /opt/TigrimOS/tiger_cowork/.env'
+            $envScript | wsl -d $WSL_DISTRO -u root -- bash -c 'tr -d ''\015'' | bash' *>> $LOG_FILE
 
             # ============================================================
             # STEP 7: Start TigrimOS
@@ -569,11 +571,11 @@ ENVEOF
             Update-ProgressInner 7 7 "Starting TigrimOS..." "Launching server"
 
             # Kill any existing
-            wsl -d $WSL_DISTRO -- bash -c "pkill -f 'node.*server' 2>/dev/null; pkill -f 'tsx.*index' 2>/dev/null; true"
+            wsl -d $WSL_DISTRO -u root -- bash -c "pkill -f 'node.*server' 2>/dev/null; pkill -f 'tsx.*index' 2>/dev/null; true"
             Start-Sleep -Seconds 1
 
-            # Start server
-            wsl -d $WSL_DISTRO -- bash -c "cd /opt/TigrimOS/tiger_cowork && export NODE_ENV=production && export PORT=3001 && nohup npx tsx server/index.ts > /tmp/tigrimos.log 2>&1 &"
+            # Start server (use Start-Process so wsl doesn't block the installer)
+            Start-Process -WindowStyle Hidden -FilePath "wsl" -ArgumentList "-d", $WSL_DISTRO, "-u", "root", "--", "bash", "-c", "cd /opt/TigrimOS/tiger_cowork && NODE_ENV=production PORT=3001 node_modules/.bin/tsx server/index.ts > /tmp/tigrimos.log 2>&1"
 
             # Wait for server
             $tries = 0
@@ -589,7 +591,7 @@ ENVEOF
             }
 
             if (-not $serverReady) {
-                Update-ProgressInner 7 7 "Warning" "Server may still be starting — opening browser anyway"
+                Update-ProgressInner 7 7 "Warning" "Server may still be starting - opening browser anyway"
                 Start-Sleep -Seconds 2
             }
 
@@ -610,17 +612,25 @@ ENVEOF
                     $shortcut = $shell.CreateShortcut($shortcutPath)
                     $shortcut.TargetPath = $startBat
                     $shortcut.WorkingDirectory = $scriptRoot
-                    $shortcut.Description = "TigrimOS — AI Workspace"
+                    $shortcut.Description = "TigrimOS - AI Workspace"
                     $shortcut.Save()
                 }
             } catch {
-                # Non-critical — skip silently
+                # Non-critical - skip silently
             }
 
             Start-Sleep -Seconds 1
 
-            # Open browser
-            Start-Process $APP_URL
+            # Open as standalone app window (Edge app mode - no browser UI)
+            $edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+            if (-not (Test-Path $edgePath)) {
+                $edgePath = "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+            }
+            if (Test-Path $edgePath) {
+                Start-Process $edgePath -ArgumentList "--app=$APP_URL", "--window-size=1280,800"
+            } else {
+                Start-Process $APP_URL
+            }
 
         } catch {
             $errMsg = $_.Exception.Message

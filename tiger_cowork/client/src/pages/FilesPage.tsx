@@ -27,6 +27,9 @@ export default function FilesPage() {
   const [dragOver, setDragOver] = useState(false);
   const [richPreview, setRichPreview] = useState<{ type: string; html: string } | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [showConnectFolder, setShowConnectFolder] = useState(false);
+  const [connectPath, setConnectPath] = useState("");
+  const [connectName, setConnectName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleSelect = (path: string, e: React.MouseEvent) => {
@@ -216,6 +219,25 @@ export default function FilesPage() {
     setDragOver(false);
   };
 
+  const connectFolder = async () => {
+    if (!connectPath) return;
+    try {
+      await api.connectFolder(connectPath, connectName || undefined);
+      setShowConnectFolder(false);
+      setConnectPath("");
+      setConnectName("");
+      loadFiles(currentPath);
+    } catch (err) {
+      alert("Failed to connect folder. Make sure the path exists.");
+    }
+  };
+
+  const disconnectFolder = async (name: string) => {
+    if (!confirm(`Disconnect shared folder "${name}"?`)) return;
+    await api.disconnectFolder(name);
+    loadFiles(currentPath);
+  };
+
   return (
     <div className="page-split">
       <div
@@ -257,6 +279,7 @@ export default function FilesPage() {
             >
               {uploading ? "Uploading..." : "Upload"}
             </button>
+            <button className="btn btn-secondary" onClick={() => setShowConnectFolder(true)}>Connect Folder</button>
             <button className="btn btn-secondary" onClick={() => setShowNewDir(true)}>Mkdir</button>
             <button className="btn btn-secondary" onClick={() => setShowNew(true)}>New file</button>
           </div>
@@ -273,6 +296,32 @@ export default function FilesPage() {
             </span>
           ))}
         </div>
+
+        {showConnectFolder && (
+          <div className="inline-form" style={{ flexDirection: "column", alignItems: "stretch", gap: 8, padding: "12px 16px", background: "var(--bg-secondary, #1e293b)", borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Connect a Windows folder to sandbox</div>
+            <input
+              placeholder="Windows path, e.g. C:\Users\you\Documents"
+              value={connectPath}
+              onChange={(e) => setConnectPath(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && connectFolder()}
+              autoFocus
+              style={{ width: "100%" }}
+            />
+            <input
+              placeholder="Display name (optional)"
+              value={connectName}
+              onChange={(e) => setConnectName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && connectFolder()}
+              style={{ width: "100%" }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-primary" onClick={connectFolder}>Connect</button>
+              <button className="btn btn-ghost" onClick={() => { setShowConnectFolder(false); setConnectPath(""); setConnectName(""); }}>Cancel</button>
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.6 }}>The folder will appear under shared/ in the sandbox file browser.</div>
+          </div>
+        )}
 
         {showNewDir && (
           <div className="inline-form">
@@ -307,10 +356,14 @@ export default function FilesPage() {
                 onChange={() => {}}
                 style={{ cursor: "pointer", marginRight: 4, flexShrink: 0 }}
               />
-              <span className="file-icon">{file.isDirectory ? "📁" : "📄"}</span>
+              <span className="file-icon">{file.isDirectory ? (currentPath === "shared" ? "🔗" : "📁") : "📄"}</span>
               <span className="file-name">{file.name}</span>
               <span className="file-size">{formatSize(file.size)}</span>
-              <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); deleteFile(file.path); }}>×</button>
+              {currentPath === "shared" && file.isDirectory ? (
+                <button className="btn btn-ghost btn-sm" title="Disconnect folder" onClick={(e) => { e.stopPropagation(); disconnectFolder(file.name); }} style={{ color: "#e57373" }}>×</button>
+              ) : (
+                <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); deleteFile(file.path); }}>×</button>
+              )}
               {!file.isDirectory && (
                 <a className="btn btn-ghost btn-sm" href={api.downloadUrl(file.path)} download onClick={(e) => e.stopPropagation()}>↓</a>
               )}

@@ -73,6 +73,11 @@ export const api = {
     return res.json();
   },
 
+  // Shared Folders
+  getSharedFolders: () => request("/files/shared-folders"),
+  connectFolder: (hostPath: string, name?: string) => request("/files/shared-folders", { method: "POST", body: JSON.stringify({ hostPath, name }) }),
+  disconnectFolder: (name: string) => request(`/files/shared-folders?name=${encodeURIComponent(name)}`, { method: "DELETE" }),
+
   // Python
   runPython: (code: string) => request("/python/run", { method: "POST", body: JSON.stringify({ code }) }),
 
