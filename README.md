@@ -43,8 +43,7 @@ AI-generated code and shell commands **cannot escape the sandbox** or touch your
 ### macOS
 
 - macOS 13.0 (Ventura) or later
-- Xcode Command Line Tools (`xcode-select --install`)
-- Homebrew with `qemu` (`brew install qemu`)
+- [Homebrew](https://brew.sh/) with `qemu` (Intel only: `brew install qemu`)
 - 4 GB RAM available for the VM
 - ~5 GB disk space (Ubuntu image + TigrimOS)
 
@@ -57,30 +56,26 @@ AI-generated code and shell commands **cannot escape the sandbox** or touch your
 
 ## Installation
 
-### macOS — Ready-to-Run (pre-built)
+### macOS
 
-1. Download the correct `.app` for your Mac (Intel or Apple Silicon)
-2. Move it to `/Applications`
-3. First launch: right-click the app → **Open** (bypasses Gatekeeper once)
-4. If blocked: **System Settings → Privacy & Security → Open Anyway**
+1. Install [Homebrew](https://brew.sh/) if you don't have it:
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+2. **Intel Macs only** — install qemu (needed to convert the disk image):
+   ```bash
+   brew install qemu
+   ```
+3. Download the release zip for your Mac from [Releases](https://github.com/Sompote/Tigrimos/releases):
+   - **Apple Silicon** (M1/M2/M3/M4): `TigrimOS-v1.0.0-macOS-AppleSilicon.zip`
+   - **Intel**: `TigrimOS-v1.0.0-macOS-Intel.zip`
+4. Unzip — you get `TigrimOS.app` (or `TigrimOS_i.app`) and `tiger_cowork/` folder
+5. Keep both in the **same directory** (the app needs `tiger_cowork/` next to it)
+6. Double-click the `.app` to launch
+7. First launch: if macOS blocks it, right-click → **Open**, or go to **System Settings → Privacy & Security → Open Anyway**
+8. Wait ~5-10 minutes for the Ubuntu sandbox to provision on first run
 
-### macOS — Build from Source
-
-```bash
-git clone https://github.com/Sompote/TigrimOS.git
-cd TigrimOS
-
-# Install qemu (needed once, for disk image conversion)
-brew install qemu
-
-# Build for your Mac
-swift build -c release
-
-# Create the .app bundle
-./Scripts/build.sh intel    # Intel Mac
-./Scripts/build.sh silicon  # Apple Silicon Mac
-./Scripts/build.sh all      # Both
-```
+That's it. Subsequent launches start in under a minute.
 
 ### Windows — Installer
 
