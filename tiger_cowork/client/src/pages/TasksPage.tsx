@@ -1,9 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../utils/api";
 import { useSocket } from "../hooks/useSocket";
 import AgentGraphic from "./AgentGraphic";
 import "./PageStyles.css";
+
+// Stable empty array to avoid creating new references on each render
+const EMPTY_ARR: string[] = [];
+
+// Memoized wrapper to prevent AgentGraphic re-renders when props haven't actually changed
+const MemoAgentGraphic = memo(AgentGraphic, (prev, next) => {
+  return prev.status === next.status &&
+    prev.activeAgents === next.activeAgents &&
+    prev.doneAgents === next.doneAgents &&
+    prev.agentTools === next.agentTools;
+});
 
 interface Task {
   id: string;
@@ -93,16 +104,35 @@ export default function TasksPage() {
     }
   };
 
+  // Debounced fetch: coalesce rapid socket events into one API call
+  const fetchPendingRef = useRef(false);
+  const fetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const lastActiveJsonRef = useRef("");
   const loadActiveTasks = useCallback(async () => {
-    setRefreshing(true);
     try {
       const data = await api.getActiveTasks();
-      setActiveTasks(data);
+      // Only update state if data actually changed — prevents unnecessary re-renders
+      const json = JSON.stringify(data);
+      if (json !== lastActiveJsonRef.current) {
+        lastActiveJsonRef.current = json;
+        setActiveTasks(data);
+      }
     } catch {
       // ignore
     }
-    setRefreshing(false);
   }, []);
+
+  // Schedule a debounced fetch (coalesces calls within 500ms)
+  const scheduleFetch = useCallback(() => {
+    if (fetchPendingRef.current) return; // already scheduled
+    fetchPendingRef.current = true;
+    if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
+    fetchTimerRef.current = setTimeout(() => {
+      fetchPendingRef.current = false;
+      loadActiveTasks();
+    }, 500);
+  }, [loadActiveTasks]);
 
   useEffect(() => {
     api.getTasks().then(setTasks);
@@ -115,7 +145,7 @@ export default function TasksPage() {
     return () => clearInterval(interval);
   }, [loadActiveTasks]);
 
-  // Real-time socket updates: refresh on agent activity events
+  // Real-time socket updates: debounced refresh on agent activity events
   useEffect(() => {
     const unsub = onStatus((data: any) => {
       if (data.status === "thinking" || data.status === "done" || data.status === "job_complete" ||
@@ -123,11 +153,11 @@ export default function TasksPage() {
           data.status === "realtime_agent_working" || data.status === "realtime_agent_tool" ||
           data.status === "realtime_agent_done" || data.status === "subagent_spawn" ||
           data.status === "subagent_tool" || data.status === "subagent_done") {
-        loadActiveTasks();
+        scheduleFetch();
       }
     });
     return unsub;
-  }, [onStatus, loadActiveTasks]);
+  }, [onStatus, scheduleFetch]);
 
   const createTask = async () => {
     const task = await api.createTask(form);
@@ -153,7 +183,7 @@ export default function TasksPage() {
         <h1>Running Agent Tasks</h1>
         <button
           className={`btn btn-ghost btn-sm${refreshing ? " spin-btn" : ""}`}
-          onClick={loadActiveTasks}
+          onClick={async () => { setRefreshing(true); await loadActiveTasks(); setRefreshing(false); }}
           disabled={refreshing}
           title="Refresh"
         >
@@ -288,10 +318,10 @@ export default function TasksPage() {
                 </div>
               </div>
               {graphicOpen[task.id] && (
-                <AgentGraphic
+                <MemoAgentGraphic
                   agentTools={task.agentTools}
-                  activeAgents={task.activeAgents || []}
-                  doneAgents={task.doneAgents || []}
+                  activeAgents={task.activeAgents || EMPTY_ARR}
+                  doneAgents={task.doneAgents || EMPTY_ARR}
                   status={task.status}
                 />
               )}

@@ -19,11 +19,13 @@ import { toolsRoutes } from "./routes/tools";
 import { clawhubRoutes } from "./routes/clawhub";
 import { projectsRoutes } from "./routes/projects";
 import { agentsRoutes } from "./routes/agents";
+import { remoteRoutes } from "./routes/remote";
 import { terminalRoutes, setupTerminalSocket } from "./routes/terminal";
 import { setupSocket } from "./services/socket";
 import { initMcpServers } from "./services/mcp";
 import { initScheduler } from "./services/scheduler";
-import { getFileTokens, saveFileTokens, generateToken, isValidFileToken } from "./services/data";
+import { initTunnel } from "./services/tunnel";
+import { getFileTokens, saveFileTokens, generateToken, isValidFileToken, isValidRemoteBridgeToken } from "./services/data";
 
 dotenv.config();
 
@@ -98,7 +100,7 @@ async function start() {
   }
 
   // Register plugins
-  await fastify.register(fastifyCors, { origin: "*", methods: ["GET", "POST"] });
+  await fastify.register(fastifyCors, { origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] });
 
   // Auth verify endpoint (no auth required) — registered before auth hook
   fastify.post("/api/auth/verify", async (request, reply) => {
@@ -125,6 +127,10 @@ async function start() {
         if (token === ACCESS_TOKEN) return;
         // Allow file token for /files routes
         if (request.url.startsWith("/api/files") && token && (await isValidFileToken(token))) return;
+        // Allow remote bridge token for /chat, /remote, and remote-token routes (used by remote instances)
+        if (request.url.startsWith("/api/chat") && token && (await isValidRemoteBridgeToken(token))) return;
+        if (request.url.startsWith("/api/remote") && token && (await isValidRemoteBridgeToken(token))) return;
+        if (request.url.startsWith("/api/settings/remote-token") && token && (await isValidRemoteBridgeToken(token))) return;
         reply.code(401);
         throw new Error("Unauthorized — invalid or missing access token");
       });
@@ -140,6 +146,7 @@ async function start() {
       api.register(clawhubRoutes, { prefix: "/clawhub" });
       api.register(projectsRoutes, { prefix: "/projects" });
       api.register(agentsRoutes, { prefix: "/agents" });
+      api.register(remoteRoutes, { prefix: "/remote" });
       api.register(terminalRoutes, { prefix: "/terminal" });
     },
     { prefix: "/api" }
@@ -175,11 +182,12 @@ async function start() {
     { prefix: "/sandbox" }
   );
 
-  // Socket.io access token auth
+  // Socket.io access token auth — accept ACCESS_TOKEN or valid remote bridge token
   if (ACCESS_TOKEN) {
-    io.use((socket, next) => {
+    io.use(async (socket, next) => {
       const token = socket.handshake.auth?.token;
       if (token === ACCESS_TOKEN) return next();
+      if (token && await isValidRemoteBridgeToken(token)) return next();
       return next(new Error("Unauthorized — invalid or missing access token"));
     });
   }
@@ -226,6 +234,9 @@ async function start() {
 
   // Initialize MCP servers in background (don't block startup)
   initMcpServers().catch((err) => console.error("[MCP] Init error:", err.message));
+
+  // Auto-start Cloudflare tunnel if enabled
+  initTunnel(PORT).catch((err) => console.error("[Tunnel] Init error:", err.message));
 }
 
 start();

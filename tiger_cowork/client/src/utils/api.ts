@@ -171,6 +171,21 @@ export const api = {
   deleteFileToken: (id: string) => request(`/settings/file-tokens/${id}`, { method: "DELETE" }),
   regenerateFileToken: (id: string) => request(`/settings/file-tokens/${id}/regenerate`, { method: "POST" }),
 
+  // Cloudflare Tunnel
+  getTunnelStatus: () => request("/settings/tunnel/status"),
+  startTunnel: () => request("/settings/tunnel/start", { method: "POST" }),
+  stopTunnel: () => request("/settings/tunnel/stop", { method: "POST" }),
+
+  // Remote Bridge Tokens (tokens this machine generates for others to connect)
+  getRemoteBridgeTokens: () => request("/settings/remote-bridge-tokens"),
+  createRemoteBridgeToken: (name: string) => request("/settings/remote-bridge-tokens", { method: "POST", body: JSON.stringify({ name }) }),
+  deleteRemoteBridgeToken: (id: string) => request(`/settings/remote-bridge-tokens/${id}`, { method: "DELETE" }),
+  regenerateRemoteBridgeToken: (id: string) => request(`/settings/remote-bridge-tokens/${id}/regenerate`, { method: "POST" }),
+
+  // Remote Instances (other machines this machine connects to)
+  testRemoteInstance: (data: { id?: string; url?: string; token?: string }) =>
+    request("/settings/remote-instances/test", { method: "POST", body: JSON.stringify(data) }),
+
   // MCP
   mcpStatus: () => request("/settings/mcp/status"),
   mcpConnect: (name: string, url: string, type?: string, headers?: Record<string, string>) => request("/settings/mcp/connect", { method: "POST", body: JSON.stringify({ name, url, type, headers }) }),

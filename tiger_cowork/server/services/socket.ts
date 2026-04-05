@@ -54,12 +54,21 @@ const activeTasks = new Map<string, ActiveTask>();
 const taskAbortControllers = new Map<string, AbortController>();
 
 export function getActiveTasks(): (Omit<ActiveTask, 'activeAgents' | 'doneAgents'> & { activeAgents: string[]; doneAgents: string[] })[] {
-  return Array.from(activeTasks.values()).map(t => ({
-    ...t,
-    activeAgents: Array.from(t.activeAgents),
-    doneAgents: Array.from(t.doneAgents),
-    activeAgent: t.activeAgents.size > 0 ? Array.from(t.activeAgents).join(", ") : t.activeAgent,
-  }));
+  return Array.from(activeTasks.values()).map(t => {
+    // Send only the last 50 tools per agent and last 200 toolCalls to keep payloads small
+    const trimmedAgentTools: Record<string, string[]> = {};
+    for (const [agent, tools] of Object.entries(t.agentTools)) {
+      trimmedAgentTools[agent] = tools.length > 50 ? tools.slice(-50) : tools;
+    }
+    return {
+      ...t,
+      agentTools: trimmedAgentTools,
+      toolCalls: t.toolCalls.length > 200 ? t.toolCalls.slice(-200) : t.toolCalls,
+      activeAgents: Array.from(t.activeAgents),
+      doneAgents: Array.from(t.doneAgents),
+      activeAgent: t.activeAgents.size > 0 ? Array.from(t.activeAgents).join(", ") : t.activeAgent,
+    };
+  });
 }
 
 export function killActiveTask(taskId: string): boolean {
@@ -232,13 +241,35 @@ export function setupSocket(io: Server): void {
           task.activeAgents.add(agentLabel);
           task.activeAgent = agentLabel;
           if (!task.agentTools[agentLabel]) task.agentTools[agentLabel] = [];
+        } else if (data.status === "running" && data.content) {
+          // Remote agent progress — push tool entry with content so graphic shows bubble
+          task.activeAgents.add(agentLabel);
+          task.activeAgent = agentLabel;
+          if (!task.agentTools[agentLabel]) task.agentTools[agentLabel] = [];
+          const agentToolList = task.agentTools[agentLabel];
+          if (agentToolList.length >= 500) agentToolList.splice(0, agentToolList.length - 250);
+          // Encode remote content as "remote:<text>" so client can display it in bubble
+          const shortContent = data.content.replace(/^\[.*?\]\s*/, "").slice(0, 80);
+          agentToolList.push(`remote:${shortContent}`);
+          if (task.toolCalls.length >= 2000) task.toolCalls.splice(0, task.toolCalls.length - 1000);
+          task.toolCalls.push("remote_progress");
         } else if ((data.status === "subagent_tool" || data.status === "realtime_agent_tool") && data.tool) {
           task.activeAgents.add(agentLabel);
           task.activeAgent = agentLabel;
           if (!task.agentTools[agentLabel]) task.agentTools[agentLabel] = [];
-          task.agentTools[agentLabel].push(data.tool);
+          const agentToolList = task.agentTools[agentLabel];
+          // Cap per-agent tool history to prevent unbounded memory growth
+          if (agentToolList.length >= 500) agentToolList.splice(0, agentToolList.length - 250);
+          // Encode remote progress content into the tool name so graphic bubble shows actual status
+          if (data.tool === "remote_progress" && data.content) {
+            const shortContent = data.content.replace(/^\[.*?\]\s*/, "").slice(0, 80);
+            agentToolList.push(`remote:${shortContent}`);
+          } else {
+            agentToolList.push(data.tool);
+          }
+          if (task.toolCalls.length >= 2000) task.toolCalls.splice(0, task.toolCalls.length - 1000);
           task.toolCalls.push(data.tool);
-        } else if (data.status === "subagent_done" || data.status === "realtime_agent_done") {
+        } else if (data.status === "subagent_done" || data.status === "realtime_agent_done" || data.status === "done") {
           // Agent finished — remove from active set, add to done set
           task.activeAgents.delete(agentLabel);
           task.doneAgents.add(agentLabel);
@@ -303,6 +334,12 @@ export function setupSocket(io: Server): void {
         // silent — avoid flooding
       } else if (data.status === "realtime_agent_done") {
         progressText = `> **✅ ${data.label}** task completed\n`;
+
+      // ─── Remote agent progress (streamed from polling) ───
+      } else if (data.status === "running" && data.content) {
+        progressText = `> **📡 ${data.label}** — _${data.content.replace(/^\[.*?\]\s*/, "").slice(0, 500)}_\n`;
+      } else if (data.status === "done" && data.label) {
+        progressText = `> **✅ ${data.label}** remote task completed\n`;
 
       // ─── Human Node messages (agent → human) ───
       } else if (data.status === "human_node_message") {
@@ -996,8 +1033,11 @@ img.save('${tmpOut}', 'JPEG', quality=80)
           };
 
           // Max timeout — clean up even if agents never respond
+          const lateUnsubs: (() => void)[] = [];
           const lateTimeout = setTimeout(() => {
             console.log(`[Realtime] Late-result timeout (5min) for ${sessionId}, cleaning up`);
+            // Unsubscribe all pending bus listeners to prevent leaks
+            for (const u of lateUnsubs) u();
             broadcastStatus({ sessionId, status: "done" });
             activeTasks.delete(taskId);
             taskAbortControllers.delete(taskId);
@@ -1039,6 +1079,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
 
               cleanupWhenDone();
             });
+            lateUnsubs.push(unsub);
           }
         } else {
           // No agents still working — broadcast done and clean up immediately
@@ -1638,9 +1679,10 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         if (rtSessionCheck2 && stillWorking2.length > 0) {
           console.log(`[Realtime] ${stillWorking2.length} agent(s) still working after project chat ended, setting up late-result listeners`);
 
+          const lateUnsubs2: (() => void)[] = [];
           const lateTimeout2 = setTimeout(() => {
-            console.log(`[Realtime] Late-result timeout (5min) for project ${sessionId}`);
-            // Don't shutdown — keep agents alive for follow-up messages
+            console.log(`[Realtime] Late-result timeout (5min) for project ${sessionId}, cleaning up listeners`);
+            for (const u of lateUnsubs2) u();
           }, 5 * 60 * 1000);
 
           for (const agent of stillWorking2) {
@@ -1676,6 +1718,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
 
               clearTimeout(lateTimeout2);
             });
+            lateUnsubs2.push(unsub);
           }
         }
         // Keep realtime session alive between messages for follow-up delegation
@@ -1695,6 +1738,31 @@ img.save('${tmpOut}', 'JPEG', quality=80)
 
     socket.on("disconnect", () => {
       console.log("Client disconnected:", socket.id);
+      // Tasks keep running — client can reconnect and pick up status.
+      // Orphaned tasks are cleaned up by the stale task interval below.
     });
   });
 }
+
+// ─── Stale task cleanup ───
+// Periodically remove tasks that have been running for too long (likely orphaned)
+const STALE_TASK_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [taskId, task] of activeTasks.entries()) {
+    const age = now - new Date(task.startedAt).getTime();
+    if (age > STALE_TASK_MAX_AGE_MS) {
+      console.log(`[Cleanup] Removing stale task ${taskId} (age: ${Math.round(age / 60000)}m, session: ${task.sessionId})`);
+      const controller = taskAbortControllers.get(taskId);
+      if (controller) {
+        controller.abort();
+        taskAbortControllers.delete(taskId);
+      }
+      const rtSession = getRealtimeSession(task.sessionId);
+      if (rtSession) {
+        shutdownRealtimeSession(task.sessionId);
+      }
+      activeTasks.delete(taskId);
+    }
+  }
+}, 60_000);

@@ -46,10 +46,36 @@ export default function SettingsPage() {
   const yamlUploadRef = useRef<HTMLInputElement>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
 
+  // Cloudflare Tunnel
+  const [tunnelStatus, setTunnelStatus] = useState<"stopped" | "starting" | "installing" | "running" | "error">("stopped");
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelError, setTunnelError] = useState<string | null>(null);
+  const [tunnelLoading, setTunnelLoading] = useState(false);
+  const [copiedTunnelUrl, setCopiedTunnelUrl] = useState(false);
+
+  // Remote Bridge Tokens (this machine's tokens)
+  const [bridgeTokens, setBridgeTokens] = useState<Array<{ id: string; name: string; token: string; createdAt: string }>>([]);
+  const [newBridgeTokenName, setNewBridgeTokenName] = useState("");
+  const [copiedBridgeTokenId, setCopiedBridgeTokenId] = useState<string | null>(null);
+  const [showBridgeTokenId, setShowBridgeTokenId] = useState<string | null>(null);
+
+  // Remote Instances
+  const [newRemoteName, setNewRemoteName] = useState("");
+  const [newRemoteUrl, setNewRemoteUrl] = useState("");
+  const [newRemoteToken, setNewRemoteToken] = useState("");
+  const [remoteTestResults, setRemoteTestResults] = useState<Record<string, { ok: boolean; message: string } | null>>({});
+  const [remoteTesting, setRemoteTesting] = useState<string | null>(null);
+
   useEffect(() => {
     api.getSettings().then(setSettings);
     api.mcpStatus().then(setMcpStatuses).catch(() => {});
     api.getFileTokens().then(setFileTokens).catch(() => {});
+    api.getRemoteBridgeTokens().then(setBridgeTokens).catch(() => {});
+    api.getTunnelStatus().then((s: any) => {
+      setTunnelStatus(s.status || "stopped");
+      setTunnelUrl(s.url || null);
+      setTunnelError(s.error || null);
+    }).catch(() => {});
     api.getAgentConfigs().then(setAgentConfigs).catch(() => {});
   }, []);
 
@@ -891,6 +917,381 @@ export default function SettingsPage() {
               </div>
             </details>
           )}
+        </section>
+
+        <section className="card">
+          <h3>Cloudflare Tunnel</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Expose this Tiger Cowork instance to the internet so remote machines can connect — even behind NAT, firewall, or VM.
+            <code>cloudflared</code> will be auto-installed if not found.
+          </p>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            {/* Status indicator */}
+            <span style={{
+              width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+              background: tunnelStatus === "running" ? "#34a853" : tunnelStatus === "starting" || tunnelStatus === "installing" ? "#f9ab00" : tunnelStatus === "error" ? "#ea4335" : "#607d8b",
+            }} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>
+              {tunnelStatus === "running" ? "Running" : tunnelStatus === "installing" ? "Installing cloudflared..." : tunnelStatus === "starting" ? "Starting..." : tunnelStatus === "error" ? "Error" : "Stopped"}
+            </span>
+
+            {tunnelStatus === "stopped" || tunnelStatus === "error" ? (
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={tunnelLoading}
+                onClick={async () => {
+                  setTunnelLoading(true);
+                  setTunnelError(null);
+                  setTunnelStatus("starting");
+                  try {
+                    const res = await api.startTunnel();
+                    if (res.ok) {
+                      setTunnelStatus("running");
+                      setTunnelUrl(res.url || null);
+                    } else {
+                      setTunnelStatus("error");
+                      setTunnelError(res.error || "Failed to start tunnel");
+                    }
+                  } catch (err: any) {
+                    setTunnelStatus("error");
+                    setTunnelError(err.message);
+                  }
+                  setTunnelLoading(false);
+                }}
+              >
+                {tunnelLoading ? "Starting (may install cloudflared)..." : "Enable Tunnel"}
+              </button>
+            ) : (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={async () => {
+                  await api.stopTunnel();
+                  setTunnelStatus("stopped");
+                  setTunnelUrl(null);
+                  setTunnelError(null);
+                }}
+              >
+                Disable Tunnel
+              </button>
+            )}
+          </div>
+
+          {tunnelUrl && (
+            <div style={{ background: "var(--bg-secondary, #1a1a2e)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <code style={{ flex: 1, fontSize: 13, fontFamily: "monospace", color: "#34a853", wordBreak: "break-all" }}>
+                {tunnelUrl}
+              </code>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={(e) => {
+                  e.preventDefault();
+                  try {
+                    if (navigator.clipboard && window.isSecureContext) {
+                      navigator.clipboard.writeText(tunnelUrl!);
+                    } else {
+                      const ta = document.createElement("textarea");
+                      ta.value = tunnelUrl!;
+                      ta.style.position = "fixed";
+                      ta.style.opacity = "0";
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(ta);
+                    }
+                    setCopiedTunnelUrl(true);
+                    setTimeout(() => setCopiedTunnelUrl(false), 2000);
+                  } catch { /* ignore */ }
+                }}
+              >
+                {copiedTunnelUrl ? "Copied!" : "Copy URL"}
+              </button>
+            </div>
+          )}
+          {tunnelUrl && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              Use this URL as the remote instance URL on other machines. The URL changes each restart unless you set up a named tunnel.
+            </p>
+          )}
+
+          {tunnelError && (
+            <p style={{ color: "#ea4335", fontSize: 12, marginTop: 8 }}>{tunnelError}</p>
+          )}
+
+          {tunnelStatus === "stopped" && !tunnelError && (
+            <p className="hint" style={{ marginTop: 4 }}>
+              Tunnel is off. Your instance is only reachable on the local network. Enable it to allow remote machines to connect through the internet.
+            </p>
+          )}
+        </section>
+
+        <section className="card">
+          <h3>Remote Bridge Tokens</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Generate tokens that <strong>other machines</strong> use to connect to <em>this</em> instance. Share these tokens (not your ACCESS_TOKEN) with remote peers.
+          </p>
+
+          {bridgeTokens.map((bt) => (
+            <div key={bt.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <strong>{bt.name}</strong>
+                <span style={{ flex: 1 }} />
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={(e) => { e.preventDefault(); setShowBridgeTokenId(showBridgeTokenId === bt.id ? null : bt.id); }}
+                >
+                  {showBridgeTokenId === bt.id ? "Hide Token" : "Show Token"}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    if (!window.confirm(`Regenerate "${bt.name}"? Old token stops working.`)) return;
+                    try {
+                      const updated = await api.regenerateRemoteBridgeToken(bt.id);
+                      setBridgeTokens((prev) => prev.map((t) => (t.id === bt.id ? updated : t)));
+                    } catch (err) { console.error("Regenerate failed:", err); }
+                  }}
+                >
+                  Regenerate
+                </button>
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    if (!window.confirm(`Delete "${bt.name}"? Remotes using it lose access.`)) return;
+                    try {
+                      await api.deleteRemoteBridgeToken(bt.id);
+                      setBridgeTokens((prev) => prev.filter((t) => t.id !== bt.id));
+                    } catch (err) { console.error("Delete failed:", err); }
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+              {showBridgeTokenId === bt.id && (
+                <div style={{ marginTop: 8, background: "var(--bg-secondary, #1a1a2e)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  <code style={{ flex: 1, fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", userSelect: "all" }}>
+                    {bt.token}
+                  </code>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      try {
+                        if (navigator.clipboard && window.isSecureContext) {
+                          navigator.clipboard.writeText(bt.token);
+                        } else {
+                          const ta = document.createElement("textarea");
+                          ta.value = bt.token;
+                          ta.style.position = "fixed";
+                          ta.style.opacity = "0";
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                        }
+                        setCopiedBridgeTokenId(bt.id);
+                        setTimeout(() => setCopiedBridgeTokenId(null), 2000);
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    {copiedBridgeTokenId === bt.id ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {bridgeTokens.length === 0 && (
+            <p style={{ fontSize: 13, opacity: 0.5, margin: "8px 0" }}>No bridge tokens yet. Generate one and share it with remote machines.</p>
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+            <input
+              placeholder="Token name (e.g. Cloud PC, Home PC)"
+              value={newBridgeTokenName}
+              onChange={(e) => setNewBridgeTokenName(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter") {
+                  const token = await api.createRemoteBridgeToken(newBridgeTokenName || `Bridge Token ${bridgeTokens.length + 1}`);
+                  setBridgeTokens([...bridgeTokens, token]);
+                  setNewBridgeTokenName("");
+                }
+              }}
+              style={{ width: 220 }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                const token = await api.createRemoteBridgeToken(newBridgeTokenName || `Bridge Token ${bridgeTokens.length + 1}`);
+                setBridgeTokens([...bridgeTokens, token]);
+                setNewBridgeTokenName("");
+              }}
+            >
+              Generate Token
+            </button>
+          </div>
+        </section>
+
+        <section className="card">
+          <h3>Remote Instances</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Connect to Tiger Cowork on <strong>other machines</strong>. Use their <em>Bridge Token</em> or ACCESS_TOKEN to authenticate. Test works immediately — click Save to persist.
+          </p>
+
+          {/* Existing instances */}
+          {(settings.remoteInstances || []).map((inst: any) => (
+            <div key={inst.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <strong style={{ minWidth: 100 }}>{inst.name}</strong>
+                <span style={{ flex: 1, opacity: 0.7, fontFamily: "monospace", fontSize: 12 }}>{inst.url}</span>
+                <span style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>{inst.token}</span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={remoteTesting === inst.id}
+                  onClick={async () => {
+                    setRemoteTesting(inst.id);
+                    setRemoteTestResults((prev) => ({ ...prev, [inst.id]: null }));
+                    try {
+                      const res = await api.testRemoteInstance({ id: inst.id, url: inst.url, token: inst.token });
+                      setRemoteTestResults((prev) => ({ ...prev, [inst.id]: res }));
+                    } catch (err: any) {
+                      setRemoteTestResults((prev) => ({ ...prev, [inst.id]: { ok: false, message: err.message } }));
+                    }
+                    setRemoteTesting(null);
+                  }}
+                >
+                  {remoteTesting === inst.id ? "Testing..." : "Test"}
+                </button>
+                {remoteTestResults[inst.id] && (
+                  <span style={{ fontSize: 11, color: remoteTestResults[inst.id]!.ok ? "#34a853" : "#ea4335" }}>
+                    {remoteTestResults[inst.id]!.ok ? "\u2713" : "\u2717"} {(remoteTestResults[inst.id]!.message || "").slice(0, 40)}
+                  </span>
+                )}
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={() => {
+                    const updated = (settings.remoteInstances || []).filter((i: any) => i.id !== inst.id);
+                    setSettings((prev: any) => ({ ...prev, remoteInstances: updated }));
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 10, opacity: 0.5 }}>Persona (who is this agent?)</label>
+                  <input
+                    style={{ width: "100%", fontSize: 12, marginTop: 2 }}
+                    placeholder="e.g. Senior Python developer with GPU access"
+                    value={inst.persona || ""}
+                    onChange={(e) => {
+                      const updated = (settings.remoteInstances || []).map((i: any) =>
+                        i.id === inst.id ? { ...i, persona: e.target.value } : i
+                      );
+                      setSettings((prev: any) => ({ ...prev, remoteInstances: updated }));
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 10, opacity: 0.5 }}>Responsibility (what tasks to send here?)</label>
+                  <input
+                    style={{ width: "100%", fontSize: 12, marginTop: 2 }}
+                    placeholder="e.g. ML training, image generation, heavy computation"
+                    value={inst.responsibility || ""}
+                    onChange={(e) => {
+                      const updated = (settings.remoteInstances || []).map((i: any) =>
+                        i.id === inst.id ? { ...i, responsibility: e.target.value } : i
+                      );
+                      setSettings((prev: any) => ({ ...prev, remoteInstances: updated }));
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+          {(settings.remoteInstances || []).length === 0 && (
+            <p style={{ fontSize: 13, opacity: 0.5, margin: "8px 0" }}>No remote instances configured yet.</p>
+          )}
+
+          {/* Add new instance */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <label style={{ fontSize: 11, fontWeight: 600 }}>Name</label>
+              <input
+                style={{ width: 120 }}
+                placeholder="e.g. cloud-pc"
+                value={newRemoteName}
+                onChange={(e) => setNewRemoteName(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <label style={{ fontSize: 11, fontWeight: 600 }}>URL</label>
+              <input
+                style={{ width: 220 }}
+                placeholder="http://192.168.1.x:3001"
+                value={newRemoteUrl}
+                onChange={(e) => setNewRemoteUrl(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <label style={{ fontSize: 11, fontWeight: 600 }}>Bridge Token</label>
+              <input
+                type="password"
+                style={{ width: 180 }}
+                placeholder="rtk_... (from remote machine)"
+                value={newRemoteToken}
+                onChange={(e) => setNewRemoteToken(e.target.value)}
+              />
+            </div>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={!newRemoteName.trim() || !newRemoteUrl.trim() || !newRemoteToken.trim()}
+              onClick={() => {
+                const newInst = {
+                  id: newRemoteName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-"),
+                  name: newRemoteName.trim(),
+                  url: newRemoteUrl.trim().replace(/\/$/, ""),
+                  token: newRemoteToken.trim(),
+                };
+                const existing = settings.remoteInstances || [];
+                setSettings((prev: any) => ({ ...prev, remoteInstances: [...existing, newInst] }));
+                setNewRemoteName("");
+                setNewRemoteUrl("");
+                setNewRemoteToken("");
+              }}
+            >
+              Add Instance
+            </button>
+          </div>
+          <p className="hint" style={{ marginTop: 8 }}>
+            Changes are saved when you click the global Save button.
+          </p>
+
+          {/* Remote Agent Timeouts */}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+            <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: "block" }}>Remote Agent Timeouts</label>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              Controls how long to wait when delegating tasks to remote instances.
+            </p>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <div className="form-group" style={{ flex: 1, minWidth: 140 }}>
+                <label>Poll Interval (seconds)</label>
+                <input type="number" value={settings.remotePollInterval ?? 2} onChange={(e) => setSettings({ ...settings, remotePollInterval: Math.min(30, Math.max(1, parseInt(e.target.value) || 2)) })} min={1} max={30} step={1} />
+                <p className="hint">How often to check remote agent status (default: 2s)</p>
+              </div>
+              <div className="form-group" style={{ flex: 1, minWidth: 140 }}>
+                <label>Idle Timeout (seconds)</label>
+                <input type="number" value={settings.remoteIdleTimeout ?? 60} onChange={(e) => setSettings({ ...settings, remoteIdleTimeout: Math.min(600, Math.max(10, parseInt(e.target.value) || 60)) })} min={10} max={600} step={10} />
+                <p className="hint">Abort if no new progress for this long (default: 60s)</p>
+              </div>
+              <div className="form-group" style={{ flex: 1, minWidth: 140 }}>
+                <label>Max Timeout (seconds)</label>
+                <input type="number" value={settings.remoteMaxTimeout ?? 1800} onChange={(e) => setSettings({ ...settings, remoteMaxTimeout: Math.min(7200, Math.max(60, parseInt(e.target.value) || 1800)) })} min={60} max={7200} step={60} />
+                <p className="hint">Hard cap regardless of activity (default: 1800s / 30 min)</p>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="card">

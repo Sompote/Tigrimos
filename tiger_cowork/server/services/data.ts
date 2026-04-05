@@ -73,6 +73,10 @@ export interface Settings {
   subAgentMaxConcurrent?: number;
   subAgentTimeout?: number;
   subAgentConfigFile?: string;
+  remoteInstances?: Array<{ id: string; name: string; url: string; token: string; persona?: string; responsibility?: string }>;
+  remotePollInterval?: number;   // seconds — how often to poll remote agent (default: 2)
+  remoteIdleTimeout?: number;    // seconds — abort if no progress for this long (default: 60)
+  remoteMaxTimeout?: number;     // seconds — hard cap regardless of activity (default: 1800)
   [key: string]: any;
 }
 
@@ -131,6 +135,27 @@ export function generateToken(): string {
 
 export async function isValidFileToken(token: string): Promise<boolean> {
   const tokens = await getFileTokens();
+  return tokens.some((t) => t.token === token);
+}
+
+// Remote Bridge Tokens — separate from ACCESS_TOKEN, used by other machines to connect
+export interface RemoteBridgeToken {
+  id: string;
+  name: string;
+  token: string;
+  createdAt: string;
+}
+
+export async function getRemoteBridgeTokens(): Promise<RemoteBridgeToken[]> {
+  return readJSON("remote_bridge_tokens.json");
+}
+
+export async function saveRemoteBridgeTokens(tokens: RemoteBridgeToken[]): Promise<void> {
+  await writeJSON("remote_bridge_tokens.json", tokens);
+}
+
+export async function isValidRemoteBridgeToken(token: string): Promise<boolean> {
+  const tokens = await getRemoteBridgeTokens();
   return tokens.some((t) => t.token === token);
 }
 

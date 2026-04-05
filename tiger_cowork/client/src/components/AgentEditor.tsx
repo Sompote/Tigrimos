@@ -20,6 +20,11 @@ interface AgentNode {
   p2pConfidenceDomains: string[];
   p2pReputationScore: number;
   p2pBidder: boolean;
+  // Remote agent fields
+  isRemote: boolean;
+  remoteInstance: string;   // saved instance name/id
+  remoteUrl: string;        // inline URL fallback
+  remoteToken: string;      // inline token
 }
 
 interface P2PGovernance {
@@ -80,12 +85,14 @@ function AgentDefPanel({
   onClose,
   onDelete,
   orchestrationMode,
+  remoteInstances,
 }: {
   agent: AgentNode;
   onUpdate: (a: AgentNode) => void;
   onClose: () => void;
   onDelete: () => void;
   orchestrationMode: string;
+  remoteInstances: Array<{ id: string; name: string; url: string; token: string }>;
 }) {
   const [llmPrompt, setLlmPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -190,8 +197,64 @@ function AgentDefPanel({
               ))}
             </select>
           </div>
-          {/* Model, Persona, Responsibilities — hidden for human nodes */}
+          {/* Remote Agent Toggle */}
           {agent.role !== "human" && (
+            <div className="form-group" style={{ marginTop: 8 }}>
+              <label className="bus-toggle-label">
+                <input
+                  type="checkbox"
+                  checked={agent.isRemote}
+                  onChange={(e) => onUpdate({ ...agent, isRemote: e.target.checked, color: e.target.checked ? "#6366f1" : (ROLE_COLORS[agent.role] || ROLE_COLORS.default) })}
+                />
+                <span>Remote Agent (runs on another machine)</span>
+              </label>
+            </div>
+          )}
+
+          {/* Remote Agent Config */}
+          {agent.isRemote && (
+            <>
+              <div className="agent-def-divider">remote instance</div>
+              <div className="form-group">
+                <label>Remote Instance</label>
+                <select
+                  value={agent.remoteInstance}
+                  onChange={(e) => onUpdate({ ...agent, remoteInstance: e.target.value })}
+                >
+                  <option value="">— select saved instance —</option>
+                  {remoteInstances.map((ri) => (
+                    <option key={ri.id} value={ri.id}>{ri.name} ({ri.url})</option>
+                  ))}
+                </select>
+                <p className="bus-hint">Choose a saved instance from Settings → Remote Instances</p>
+              </div>
+              {!agent.remoteInstance && (
+                <>
+                  <div className="agent-def-divider">or use inline URL</div>
+                  <div className="form-group">
+                    <label>Remote URL</label>
+                    <input
+                      value={agent.remoteUrl}
+                      onChange={(e) => onUpdate({ ...agent, remoteUrl: e.target.value })}
+                      placeholder="http://192.168.1.x:3001"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Remote Token</label>
+                    <input
+                      type="password"
+                      value={agent.remoteToken}
+                      onChange={(e) => onUpdate({ ...agent, remoteToken: e.target.value })}
+                      placeholder="rtk_... (bridge token of remote machine)"
+                    />
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* Model, Persona, Responsibilities — hidden for human and remote nodes */}
+          {agent.role !== "human" && !agent.isRemote && (
             <>
               <div className="form-group">
                 <label className="model-checkbox-label">
@@ -327,46 +390,51 @@ function AgentDefPanel({
             </>
           )}
 
-          {/* Bus Connection */}
-          <div className="agent-def-divider">communication</div>
-          <div className="form-group">
-            <label className="bus-toggle-label">
-              <input
-                type="checkbox"
-                checked={agent.busEnabled}
-                onChange={(e) => onUpdate({ ...agent, busEnabled: e.target.checked })}
-              />
-              <span>Connected to Message Bus</span>
-            </label>
-            <p className="bus-hint">Shared broadcast channel — all bus-connected agents can see messages</p>
-          </div>
-          {agent.busEnabled && (
-            <div className="form-group">
-              <label>Bus Topics (one per line)</label>
-              <textarea
-                value={agent.busTopics.join("\n")}
-                onChange={(e) => onUpdate({ ...agent, busTopics: e.target.value.split("\n").filter(Boolean) })}
-                rows={3}
-                placeholder="parameter_share&#10;clash_flag&#10;status_update"
-              />
-            </div>
+          {/* Bus/Mesh/P2P — hidden for remote agents */}
+          {!agent.isRemote && (
+            <>
+              {/* Bus Connection */}
+              <div className="agent-def-divider">communication</div>
+              <div className="form-group">
+                <label className="bus-toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={agent.busEnabled}
+                    onChange={(e) => onUpdate({ ...agent, busEnabled: e.target.checked })}
+                  />
+                  <span>Connected to Message Bus</span>
+                </label>
+                <p className="bus-hint">Shared broadcast channel — all bus-connected agents can see messages</p>
+              </div>
+              {agent.busEnabled && (
+                <div className="form-group">
+                  <label>Bus Topics (one per line)</label>
+                  <textarea
+                    value={agent.busTopics.join("\n")}
+                    onChange={(e) => onUpdate({ ...agent, busTopics: e.target.value.split("\n").filter(Boolean) })}
+                    rows={3}
+                    placeholder="parameter_share&#10;clash_flag&#10;status_update"
+                  />
+                </div>
+              )}
+
+              {/* Mesh — free to talk to any agent */}
+              <div className="form-group">
+                <label className="bus-toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={agent.meshEnabled}
+                    onChange={(e) => onUpdate({ ...agent, meshEnabled: e.target.checked })}
+                  />
+                  <span>Mesh (free to talk)</span>
+                </label>
+                <p className="bus-hint">Can send tasks to any agent without needing connection lines</p>
+              </div>
+            </>
           )}
 
-          {/* Mesh — free to talk to any agent */}
-          <div className="form-group">
-            <label className="bus-toggle-label">
-              <input
-                type="checkbox"
-                checked={agent.meshEnabled}
-                onChange={(e) => onUpdate({ ...agent, meshEnabled: e.target.checked })}
-              />
-              <span>Mesh (free to talk)</span>
-            </label>
-            <p className="bus-hint">Can send tasks to any agent without needing connection lines</p>
-          </div>
-
           {/* P2P Peer Configuration */}
-          {agent.role === "peer" && (
+          {agent.role === "peer" && !agent.isRemote && (
             <>
               <div className="agent-def-divider">P2P peer config</div>
               <div className="form-group">
@@ -395,7 +463,7 @@ function AgentDefPanel({
           )}
 
           {/* P2P Bidder toggle for p2p_orchestrator mode */}
-          {orchestrationMode === "p2p_orchestrator" && agent.role !== "human" && (
+          {orchestrationMode === "p2p_orchestrator" && agent.role !== "human" && !agent.isRemote && (
             <>
               <div className="agent-def-divider">P2P Orchestrator config</div>
               <div className="form-group">
@@ -561,6 +629,9 @@ export default function AgentEditor({
   const [existingFiles, setExistingFiles] = useState<{ filename: string; name: string; agentCount: number; updatedAt: string }[]>([]);
   const [uploadError, setUploadError] = useState("");
 
+  // Remote instances from settings
+  const [remoteInstances, setRemoteInstances] = useState<Array<{ id: string; name: string; url: string; token: string }>>([]);
+
   // Auto Architecture state
   const [showAutoArch, setShowAutoArch] = useState(false);
   const [autoArchMessages, setAutoArchMessages] = useState<{ role: "user" | "assistant" | "system"; content: string }[]>([]);
@@ -647,6 +718,10 @@ export default function AgentEditor({
       p2pConfidenceDomains: a.p2p?.confidence_domains || [],
       p2pReputationScore: a.p2p?.reputation_score ?? 0.8,
       p2pBidder: a.p2p?.bidder === true,
+      isRemote: a.type === "remote",
+      remoteInstance: a.remote_instance || "",
+      remoteUrl: a.remote_url || "",
+      remoteToken: a.remote_token || "",
     }));
 
     const connections: Connection[] = (sys.connections || []).map((c: any) => ({
@@ -678,7 +753,7 @@ export default function AgentEditor({
     setAutoArchResult(null);
   };
 
-  // Load initial YAML if provided
+  // Load initial YAML if provided + fetch remote instances
   useEffect(() => {
     if (initialYaml) {
       loadFromYaml(initialYaml);
@@ -687,6 +762,11 @@ export default function AgentEditor({
       setFilename(initialFilename.replace(/\.ya?ml$/i, ""));
     }
     loadExistingFiles();
+    api.getSettings().then((s: any) => {
+      if (s.remoteInstances && Array.isArray(s.remoteInstances)) {
+        setRemoteInstances(s.remoteInstances);
+      }
+    }).catch(() => {});
   }, []);
 
   const loadExistingFiles = async () => {
@@ -768,13 +848,17 @@ export default function AgentEditor({
             responsibilities: a.responsibilities || [],
             x: 100 + (i % 3) * 250,
             y: 80 + Math.floor(i / 3) * 200,
-            color: ROLE_COLORS[a.role] || ROLE_COLORS.default,
+            color: a.type === "remote" ? "#6366f1" : (ROLE_COLORS[a.role] || ROLE_COLORS.default),
             busEnabled: a.bus?.enabled || false,
             busTopics: a.bus?.topics || [],
             meshEnabled: a.mesh?.enabled || false,
             p2pConfidenceDomains: a.p2p?.confidence_domains || [],
             p2pReputationScore: a.p2p?.reputation_score ?? 0.8,
             p2pBidder: a.p2p?.bidder === true,
+            isRemote: a.type === "remote",
+            remoteInstance: a.remote_instance || "",
+            remoteUrl: a.remote_url || "",
+            remoteToken: a.remote_token || "",
           }));
 
           // Extract connections: prefer explicit connections array, fall back to workflow
@@ -864,6 +948,10 @@ export default function AgentEditor({
       p2pConfidenceDomains: [],
       p2pReputationScore: 0.8,
       p2pBidder: false,
+      isRemote: false,
+      remoteInstance: "",
+      remoteUrl: "",
+      remoteToken: "",
     };
     setState((s) => ({ ...s, agents: [...s.agents, newAgent] }));
     setSelectedAgent(newAgent.id);
@@ -1015,9 +1103,15 @@ export default function AgentEditor({
           name: a.name,
           role: a.role,
         };
-        if (a.model) agentDef.model = a.model;
-        if (a.persona) agentDef.persona = a.persona;
-        if (a.responsibilities.length > 0) agentDef.responsibilities = a.responsibilities;
+        if (a.isRemote) {
+          agentDef.type = "remote";
+          if (a.remoteInstance) agentDef.remote_instance = a.remoteInstance;
+          if (a.remoteUrl) agentDef.remote_url = a.remoteUrl;
+          if (a.remoteToken) agentDef.remote_token = a.remoteToken;
+        }
+        if (a.model && !a.isRemote) agentDef.model = a.model;
+        if (a.persona && !a.isRemote) agentDef.persona = a.persona;
+        if (a.responsibilities.length > 0 && !a.isRemote) agentDef.responsibilities = a.responsibilities;
         if (a.busEnabled) {
           agentDef.bus = {
             enabled: true,
@@ -1259,6 +1353,10 @@ export default function AgentEditor({
                   p2pConfidenceDomains: [],
                   p2pReputationScore: 1.0,
                   p2pBidder: false,
+                  isRemote: false,
+                  remoteInstance: "",
+                  remoteUrl: "",
+                  remoteToken: "",
                 };
                 setState((s) => ({ ...s, agents: [humanNode, ...s.agents] }));
                 setSelectedAgent(humanNode.id);
@@ -1551,13 +1649,21 @@ export default function AgentEditor({
                     </div>
                     <div className="agent-node-body">
                       <div className="agent-node-name">{agent.name || agent.id}</div>
-                      {agent.role !== "human" && (
+                      {agent.role !== "human" && !agent.isRemote && (
                         <div className="agent-node-model">{agent.model.split("-").slice(-2).join("-")}</div>
+                      )}
+                      {agent.isRemote && (
+                        <div className="agent-node-model" style={{ color: "#6366f1", fontSize: "9px" }}>{agent.remoteInstance || "inline"}</div>
                       )}
                       {agent.role === "human" && (
                         <div className="agent-node-model" style={{ color: "#e91e63", fontSize: "9px" }}>entry point</div>
                       )}
                     </div>
+                    {agent.isRemote && (
+                      <div className="agent-node-mesh-badge" style={{ background: "#6366f1" }} title={`Remote: ${agent.remoteInstance || agent.remoteUrl || "inline"}`}>
+                        &#8599; REMOTE
+                      </div>
+                    )}
                     {agent.busEnabled && (
                       <div className="agent-node-bus-badge" title={`Bus topics: ${agent.busTopics.join(", ") || "all"}`}>
                         BUS
@@ -1606,6 +1712,7 @@ export default function AgentEditor({
               onClose={() => setSelectedAgent(null)}
               onDelete={() => deleteAgent(selectedAgentData.id)}
               orchestrationMode={state.orchestrationMode}
+              remoteInstances={remoteInstances}
             />
           )}
 

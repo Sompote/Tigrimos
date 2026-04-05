@@ -3,7 +3,7 @@
   "version": "0.4.3",
   "private": true,
   "scripts": {
-    "dev": "tsx watch server/index.ts",
+    "dev": "tsx watch --ignore './client/**' --ignore './data/**' --ignore './sandbox/**' --ignore './skills/**' --ignore './Tiger_bot/**' server/index.ts",
     "build": "cd client && npx vite build",
     "postinstall": "npm i -g clawhub",
     "start": "NODE_ENV=production tsx server/index.ts"

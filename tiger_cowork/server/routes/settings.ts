@@ -1,6 +1,8 @@
 import { FastifyInstance } from "fastify";
-import { getSettings, saveSettings, getFileTokens, saveFileTokens, generateToken } from "../services/data";
+import { getSettings, saveSettings, getFileTokens, saveFileTokens, generateToken, getRemoteBridgeTokens, saveRemoteBridgeTokens } from "../services/data";
 import { connectServer, disconnectServer, getMcpStatus, initMcpServers } from "../services/mcp";
+import { testRemoteInstance as testRemote } from "../services/remote";
+import { getTunnelState, startTunnel, stopTunnel } from "../services/tunnel";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -24,6 +26,15 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       if (key.startsWith("provider_") && key.endsWith("_apiKey") && masked[key]) {
         masked[key] = masked[key].slice(0, 8) + "..." + masked[key].slice(-4);
       }
+    }
+    // Mask remote instance tokens
+    if (masked.remoteInstances && Array.isArray(masked.remoteInstances)) {
+      masked.remoteInstances = masked.remoteInstances.map((inst: any) => ({
+        ...inst,
+        token: inst.token && inst.token.length > 12
+          ? inst.token.slice(0, 8) + "..." + inst.token.slice(-4)
+          : inst.token,
+      }));
     }
     // Mask MCP server header values that look sensitive (Authorization, API keys, etc.)
     if (masked.mcpTools && Array.isArray(masked.mcpTools)) {
@@ -62,6 +73,14 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       if (key.startsWith("provider_") && key.endsWith("_apiKey") && body[key]?.includes("...")) {
         updated[key] = (current as any)[key];
       }
+    }
+    // Don't overwrite remote instance tokens with masked values
+    if (body.remoteInstances && Array.isArray(body.remoteInstances) && current.remoteInstances && Array.isArray(current.remoteInstances)) {
+      updated.remoteInstances = body.remoteInstances.map((inst: any) => {
+        if (!inst.token?.includes("...")) return inst;
+        const current_ = current.remoteInstances!.find((c: any) => c.id === inst.id);
+        return current_ ? { ...inst, token: current_.token } : inst;
+      });
     }
     // Don't overwrite MCP header values with masked values
     if (body.mcpTools && Array.isArray(body.mcpTools) && current.mcpTools && Array.isArray(current.mcpTools)) {
@@ -253,5 +272,105 @@ export async function settingsRoutes(fastify: FastifyInstance) {
   fastify.post("/mcp/reconnect-all", async (request, reply) => {
     await initMcpServers();
     return { ok: true, status: getMcpStatus() };
+  });
+
+  // --- Cloudflare Tunnel ---
+
+  fastify.get("/tunnel/status", async (request, reply) => {
+    return getTunnelState();
+  });
+
+  fastify.post("/tunnel/start", async (request, reply) => {
+    // Save enabled state
+    const settings = await getSettings();
+    settings.tunnelEnabled = true;
+    await saveSettings(settings);
+
+    const port = Number(process.env.PORT) || 3001;
+    const result = await startTunnel(port);
+    return result;
+  });
+
+  fastify.post("/tunnel/stop", async (request, reply) => {
+    // Save disabled state
+    const settings = await getSettings();
+    settings.tunnelEnabled = false;
+    settings.tunnelUrl = null;
+    await saveSettings(settings);
+
+    return stopTunnel();
+  });
+
+  // --- Remote Token (lightweight ping endpoint for connectivity tests) ---
+
+  fastify.get("/remote-token", async (request, reply) => {
+    // Returns a simple response to confirm the instance is reachable and auth is valid.
+    // Used by testRemoteInstance() on other machines.
+    const tokens = await getRemoteBridgeTokens();
+    const firstToken = tokens.length > 0 ? tokens[0].token : null;
+    return { token: firstToken || "no-bridge-tokens" };
+  });
+
+  // --- Remote Bridge Tokens (this machine's tokens that other machines use to connect) ---
+
+  fastify.get("/remote-bridge-tokens", async (request, reply) => {
+    return await getRemoteBridgeTokens();
+  });
+
+  fastify.post("/remote-bridge-tokens", async (request, reply) => {
+    const { name } = request.body as any;
+    const tokens = await getRemoteBridgeTokens();
+    const prefix = "rtk_";
+    const newToken = {
+      id: Date.now().toString(36),
+      name: name || `Bridge Token ${tokens.length + 1}`,
+      token: prefix + generateToken(),
+      createdAt: new Date().toISOString(),
+    };
+    tokens.push(newToken);
+    await saveRemoteBridgeTokens(tokens);
+    return newToken;
+  });
+
+  fastify.delete("/remote-bridge-tokens/:id", async (request, reply) => {
+    let tokens = await getRemoteBridgeTokens();
+    tokens = tokens.filter((t) => t.id !== (request.params as any).id);
+    await saveRemoteBridgeTokens(tokens);
+    return { success: true };
+  });
+
+  fastify.post("/remote-bridge-tokens/:id/regenerate", async (request, reply) => {
+    const tokens = await getRemoteBridgeTokens();
+    const token = tokens.find((t) => t.id === (request.params as any).id);
+    if (!token) { reply.code(404); return { error: "Token not found" }; }
+    token.token = "rtk_" + generateToken();
+    await saveRemoteBridgeTokens(tokens);
+    return token;
+  });
+
+  // --- Remote Instances ---
+
+  fastify.post("/remote-instances/test", async (request, reply) => {
+    const { id, url, token } = request.body as any;
+    let instance;
+
+    // Allow inline url+token for testing before save
+    if (url && token && !token.includes("...")) {
+      instance = { id: id || "test", name: "test", url: url.replace(/\/$/, ""), token };
+    } else if (id || (url && token?.includes("..."))) {
+      // Token is masked — look up the real token from saved settings
+      const settings = await getSettings();
+      const saved = (settings.remoteInstances || []).find((i: any) => i.id === id || i.url === url);
+      if (saved) {
+        instance = { ...saved, url: url || saved.url };
+      }
+    }
+
+    if (!instance) { reply.code(404); return { ok: false, message: "Instance not found. Save settings first or provide url+token." }; }
+    try {
+      return await testRemote(instance);
+    } catch (err: any) {
+      return { ok: false, message: err.message };
+    }
   });
 }

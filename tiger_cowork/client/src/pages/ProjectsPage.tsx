@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -344,6 +344,19 @@ function OutputCanvas({ files }: { files: string[] }) {
   );
 }
 
+// Memoized streaming message
+const StreamingMessage = memo(({ content }: { content: string }) => {
+  if (!content) return null;
+  return (
+    <div className="message assistant">
+      <div className="message-avatar">C</div>
+      <div className="message-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+      </div>
+    </div>
+  );
+});
+
 /* ─── Project Chat ─── */
 function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skill[] }) {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -359,6 +372,34 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { connected, sendProjectMessage, onChunk, onResponse, onStatus } = useSocket();
+
+  // Throttled streaming: batch chunks
+  const streamBufferRef = useRef("");
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushStreamBuffer = useCallback(() => {
+    streamFlushTimerRef.current = null;
+    if (streamBufferRef.current) {
+      const buf = streamBufferRef.current;
+      streamBufferRef.current = "";
+      setStreaming((prev) => prev + buf);
+    }
+  }, []);
+
+  // Throttled status
+  const pendingStatusRef = useRef<string | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setThrottledStatus = useCallback((s: string) => {
+    pendingStatusRef.current = s;
+    if (!statusTimerRef.current) {
+      statusTimerRef.current = setTimeout(() => {
+        statusTimerRef.current = null;
+        if (pendingStatusRef.current !== null) {
+          setStatus(pendingStatusRef.current);
+          pendingStatusRef.current = null;
+        }
+      }, 200);
+    }
+  }, []);
 
   // Collect all unique output files from messages for the right panel
   const allOutputFiles = useMemo(() => {
@@ -455,9 +496,18 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
   }, [activeSession, connected]);
 
   useEffect(() => {
-    const unsub1 = onChunk((data) => {
+    const unsub1 = onChunk((data: any) => {
       if (data.sessionId === activeSession) {
-        setStreaming((prev) => prev + data.content);
+        if (data.clear) {
+          streamBufferRef.current = "";
+          if (streamFlushTimerRef.current) { clearTimeout(streamFlushTimerRef.current); streamFlushTimerRef.current = null; }
+          setStreaming("");
+        } else {
+          streamBufferRef.current += data.content;
+          if (!streamFlushTimerRef.current) {
+            streamFlushTimerRef.current = setTimeout(flushStreamBuffer, 150);
+          }
+        }
       }
     });
     const unsub2 = onResponse((data) => {
@@ -481,7 +531,7 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
           return next;
         });
       }
-      if (data.sessionId && (data.status === "thinking" || data.status === "tool_call" || data.status === "running_python" || data.status === "retrying")) {
+      if (data.sessionId && (data.status === "thinking" || data.status === "tool_call" || data.status === "running_python" || data.status === "retrying" || (data.status === "running" && data.content && data.label))) {
         setActiveTaskSessions((prev) => {
           if (prev.has(data.sessionId)) return prev;
           const next = new Set(prev);
@@ -492,35 +542,54 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
 
       if (data.sessionId && data.sessionId !== activeSession) return;
 
-      if (data.status === "thinking") { setIsLoading(true); setStatus("Thinking..."); }
+      if (data.status === "thinking") { setIsLoading(true); setThrottledStatus("Thinking..."); }
       else if (data.status === "tool_call") {
         setIsLoading(true);
         if (data.tool === "send_task" && data.args) {
           const target = data.args.to || "agent";
           const taskPreview = data.args.task ? ` — ${data.args.task.slice(0, 60)}` : "";
-          setStatus(`Delegating to ${target}${taskPreview}...`);
+          setThrottledStatus(`Delegating to ${target}${taskPreview}...`);
         } else if (data.tool === "wait_result" && data.args) {
-          setStatus(`Waiting for ${data.args.from || "agent"} to finish...`);
+          setThrottledStatus(`Waiting for ${data.args.from || "agent"} to finish...`);
         } else {
-          setStatus(`${toolLabels[data.tool] || data.tool}...`);
+          setThrottledStatus(`${toolLabels[data.tool] || data.tool}...`);
         }
       }
       else if (data.status === "tool_result") {
-        if (data.tool === "wait_result") setStatus("Agent result received, thinking...");
-        else if (data.tool === "send_task") setStatus("Task delegated, orchestrating...");
-        else setStatus(`${toolLabels[data.tool] || data.tool} done, thinking...`);
+        if (data.tool === "wait_result") setThrottledStatus("Agent result received, thinking...");
+        else if (data.tool === "send_task") setThrottledStatus("Task delegated, orchestrating...");
+        else setThrottledStatus(`${toolLabels[data.tool] || data.tool} done, thinking...`);
       }
-      else if (data.status === "subagent_spawn") { setIsLoading(true); setStatus(`Sub-agent "${data.label}" spawned...`); }
-      else if (data.status === "subagent_tool") { setIsLoading(true); setStatus(`Sub-agent "${data.label}": ${toolLabels[data.tool] || data.tool}...`); }
-      else if (data.status === "subagent_done") setStatus(`Sub-agent "${data.label}" completed`);
-      else if (data.status === "subagent_error") setStatus(`Sub-agent "${data.label}" failed: ${data.error}`);
-      else setStatus("");
+      else if (data.status === "subagent_spawn") { setIsLoading(true); setThrottledStatus(`Sub-agent "${data.label}" spawned...`); }
+      else if (data.status === "subagent_tool") {
+        setIsLoading(true);
+        if (data.tool === "remote_progress" && data.content) {
+          setThrottledStatus(`Remote "${data.label}": ${data.content.slice(0, 100)}`);
+        } else if (data.tool === "remote_task") {
+          setThrottledStatus(`Sub-agent "${data.label}": delegating to remote...`);
+        } else {
+          setThrottledStatus(`Sub-agent "${data.label}": ${toolLabels[data.tool] || data.tool}...`);
+        }
+      }
+      else if (data.status === "subagent_done") setThrottledStatus(`Sub-agent "${data.label}" completed`);
+      else if (data.status === "subagent_error") setThrottledStatus(`Sub-agent "${data.label}" failed: ${data.error}`);
+      else if (data.status === "running" && data.content && data.label) {
+        setIsLoading(true);
+        setThrottledStatus(`Remote "${data.label}": ${data.content.slice(0, 100)}`);
+      }
+      else setThrottledStatus("");
     });
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [activeSession, onChunk, onResponse, onStatus]);
 
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!scrollTimerRef.current) {
+      scrollTimerRef.current = setTimeout(() => {
+        scrollTimerRef.current = null;
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 200);
+    }
   }, [messages, streaming]);
 
   const createNewSession = async () => {
@@ -638,14 +707,7 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
                   </div>
                 </div>
               ))}
-              {streaming && (
-                <div className="message assistant">
-                  <div className="message-avatar">C</div>
-                  <div className="message-content">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{streaming}</ReactMarkdown>
-                  </div>
-                </div>
-              )}
+              <StreamingMessage content={streaming} />
               {status && <div className="chat-status">{status}</div>}
               <div ref={messagesEndRef} />
             </div>

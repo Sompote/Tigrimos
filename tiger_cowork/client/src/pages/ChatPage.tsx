@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -269,6 +269,19 @@ function OutputCanvas({ files }: { files: string[] }) {
   );
 }
 
+// Memoized streaming message — only re-renders when streaming content changes, not on status updates
+const StreamingMessage = memo(({ content }: { content: string }) => {
+  if (!content) return null;
+  return (
+    <div className="message assistant">
+      <div className="message-avatar">C</div>
+      <div className="message-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+      </div>
+    </div>
+  );
+});
+
 export default function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -289,6 +302,38 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { connected, sendMessage, onChunk, onResponse, onStatus } = useSocket();
+
+  // ─── Throttled streaming: batch chunks to avoid re-rendering on every tiny chunk ───
+  const streamBufferRef = useRef("");
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const STREAM_FLUSH_MS = 150; // flush at most ~7 times/sec
+
+  const flushStreamBuffer = useCallback(() => {
+    streamFlushTimerRef.current = null;
+    if (streamBufferRef.current) {
+      const buf = streamBufferRef.current;
+      streamBufferRef.current = "";
+      setStreaming((prev) => prev + buf);
+    }
+  }, []);
+
+  // ─── Throttled status: coalesce rapid status updates ───
+  const pendingStatusRef = useRef<string | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const STATUS_THROTTLE_MS = 200;
+
+  const setThrottledStatus = useCallback((s: string) => {
+    pendingStatusRef.current = s;
+    if (!statusTimerRef.current) {
+      statusTimerRef.current = setTimeout(() => {
+        statusTimerRef.current = null;
+        if (pendingStatusRef.current !== null) {
+          setStatus(pendingStatusRef.current);
+          pendingStatusRef.current = null;
+        }
+      }, STATUS_THROTTLE_MS);
+    }
+  }, []);
 
   // Collect all unique output files from messages for the right panel
   const allOutputFiles = useMemo(() => {
@@ -348,6 +393,8 @@ export default function ChatPage() {
     wait_result: "Waiting for agent",
     check_agents: "Checking agents",
     error_recovery: "Recovering from error",
+    remote_task: "Remote task",
+    remote_progress: "Remote agent working",
   };
 
   // Restore in-progress state on mount, reconnect, or session switch
@@ -432,9 +479,15 @@ export default function ChatPage() {
     const unsub1 = onChunk((data: any) => {
       if (data.sessionId === activeSession) {
         if (data.clear) {
+          streamBufferRef.current = "";
+          if (streamFlushTimerRef.current) { clearTimeout(streamFlushTimerRef.current); streamFlushTimerRef.current = null; }
           setStreaming("");
         } else {
-          setStreaming((prev) => prev + data.content);
+          // Buffer chunks and flush periodically to avoid re-rendering on every tiny chunk
+          streamBufferRef.current += data.content;
+          if (!streamFlushTimerRef.current) {
+            streamFlushTimerRef.current = setTimeout(flushStreamBuffer, STREAM_FLUSH_MS);
+          }
         }
       }
     });
@@ -463,7 +516,7 @@ export default function ChatPage() {
     });
     const unsub3 = onStatus((data: any) => {
       // Track active task sessions for sidebar indicators
-      if (data.sessionId && (data.status === "thinking" || data.status === "tool_call" || data.status === "running_python" || data.status === "retrying" || data.status === "realtime_agent_working" || data.status === "realtime_agent_tool")) {
+      if (data.sessionId && (data.status === "thinking" || data.status === "tool_call" || data.status === "running_python" || data.status === "retrying" || data.status === "realtime_agent_working" || data.status === "realtime_agent_tool" || (data.status === "running" && data.content && data.label))) {
         setActiveTaskSessions((prev) => {
           if (prev.has(data.sessionId)) return prev;
           const next = new Set(prev);
@@ -476,57 +529,64 @@ export default function ChatPage() {
       if (data.sessionId && data.sessionId !== activeSession) return;
 
       if (data.status === "thinking") {
-        setStatus("Thinking...");
+        setThrottledStatus("Thinking...");
       } else if (data.status === "running_python") {
-        setStatus("Running Python...");
+        setThrottledStatus("Running Python...");
       } else if (data.status === "tool_call") {
         const label = toolLabels[data.tool] || data.tool;
         if (data.tool === "send_task" && data.args) {
           const target = data.args.to || "agent";
           const taskPreview = data.args.task ? ` — ${data.args.task.slice(0, 60)}` : "";
-          setStatus(`Delegating to ${target}${taskPreview}...`);
+          setThrottledStatus(`Delegating to ${target}${taskPreview}...`);
         } else if (data.tool === "wait_result" && data.args) {
-          setStatus(`Waiting for ${data.args.from || "agent"} to finish...`);
+          setThrottledStatus(`Waiting for ${data.args.from || "agent"} to finish...`);
         } else {
-          setStatus(`${label}...`);
+          setThrottledStatus(`${label}...`);
         }
       } else if (data.status === "tool_result") {
         const label = toolLabels[data.tool] || data.tool;
         if (data.tool === "wait_result") {
-          setStatus("Agent result received, thinking...");
+          setThrottledStatus("Agent result received, thinking...");
         } else if (data.tool === "send_task") {
-          setStatus("Task delegated, orchestrating...");
+          setThrottledStatus("Task delegated, orchestrating...");
         } else {
-          setStatus(`${label} done, thinking...`);
+          setThrottledStatus(`${label} done, thinking...`);
         }
       } else if (data.status === "subagent_spawn") {
-        setStatus(`Sub-agent "${data.label}" spawned...`);
+        setThrottledStatus(`Sub-agent "${data.label}" spawned...`);
       } else if (data.status === "subagent_tool") {
-        const label = toolLabels[data.tool] || data.tool;
-        setStatus(`Sub-agent "${data.label}": ${label}...`);
+        if (data.tool === "remote_progress" && data.content) {
+          setThrottledStatus(`Remote "${data.label}": ${data.content.slice(0, 100)}`);
+        } else if (data.tool === "remote_task") {
+          setThrottledStatus(`Sub-agent "${data.label}": delegating to remote...`);
+        } else {
+          const label = toolLabels[data.tool] || data.tool;
+          setThrottledStatus(`Sub-agent "${data.label}": ${label}...`);
+        }
       } else if (data.status === "subagent_tool_done") {
-        const label = toolLabels[data.tool] || data.tool;
-        setStatus(`Sub-agent "${data.label}": ${label} done...`);
+        // silent — keep current status
       } else if (data.status === "subagent_done") {
-        setStatus(`Sub-agent "${data.label}" completed`);
+        setThrottledStatus(`Sub-agent "${data.label}" completed`);
       } else if (data.status === "subagent_error") {
-        setStatus(`Sub-agent "${data.label}" failed: ${data.error}`);
+        setThrottledStatus(`Sub-agent "${data.label}" failed: ${data.error}`);
       // ─── Realtime Agent status ───
       } else if (data.status === "realtime_agent_ready") {
-        setStatus(`Agent "${data.label}" (${data.role}) ready`);
+        setThrottledStatus(`Agent "${data.label}" (${data.role}) ready`);
       } else if (data.status === "realtime_agent_working") {
-        setStatus(`Agent "${data.label}" working — ${(data.task || "").slice(0, 80)}`);
+        setThrottledStatus(`Agent "${data.label}" working — ${(data.task || "").slice(0, 80)}`);
       } else if (data.status === "realtime_agent_tool") {
         const label = data.tool === "error_recovery"
           ? "recovering from error"
           : toolLabels[data.tool] || data.tool;
-        setStatus(`Agent "${data.label}": ${label}...`);
+        setThrottledStatus(`Agent "${data.label}": ${label}...`);
       } else if (data.status === "realtime_agent_tool_done") {
         // silent — keep current status
       } else if (data.status === "realtime_agent_done") {
-        setStatus(`Agent "${data.label}" completed`);
+        setThrottledStatus(`Agent "${data.label}" completed`);
+      } else if (data.status === "running" && data.content && data.label) {
+        setThrottledStatus(`Remote "${data.label}": ${data.content.slice(0, 100)}`);
       } else if (data.status === "retrying") {
-        setStatus(`Retrying (${data.attempt}/${data.maxRetries})...`);
+        setThrottledStatus(`Retrying (${data.attempt}/${data.maxRetries})...`);
       } else if (data.status === "job_complete") {
         // Orchestrator finished — refresh messages and output files
         if (data.sessionId === activeSession && activeSession) {
@@ -556,8 +616,15 @@ export default function ChatPage() {
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [activeSession, onChunk, onResponse, onStatus]);
 
+  // Throttled scroll — avoid expensive DOM layout on every chunk
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!scrollTimerRef.current) {
+      scrollTimerRef.current = setTimeout(() => {
+        scrollTimerRef.current = null;
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 200);
+    }
   }, [messages, streaming]);
 
   const createNewSession = async () => {
@@ -763,14 +830,7 @@ export default function ChatPage() {
                 </div>
               </div>
             ))}
-            {streaming && (
-              <div className="message assistant">
-                <div className="message-avatar">C</div>
-                <div className="message-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{streaming}</ReactMarkdown>
-                </div>
-              </div>
-            )}
+            <StreamingMessage content={streaming} />
             {status && <div className="chat-status">{status}</div>}
             <div ref={messagesEndRef} />
           </div>

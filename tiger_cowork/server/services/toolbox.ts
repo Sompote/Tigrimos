@@ -5,6 +5,7 @@ import { promisify } from "util";
 import yaml from "js-yaml";
 import { runPython } from "./python";
 import { getSettings, appendAgentHistory, flushAgentHistory } from "./data";
+import { remoteTask, RemoteInstance } from "./remote";
 import { getMcpTools, callMcpTool, isMcpTool } from "./mcp";
 import {
   tcpOpen, tcpSend, tcpRead, tcpClose,
@@ -213,6 +214,28 @@ const spawnSubagentTool = {
         agentId: { type: "string", description: "Optional agent ID from manual YAML config to use specific agent definition" },
       },
       required: ["task"],
+    },
+  },
+};
+
+// Remote instance task delegation tool
+const remoteTaskTool = {
+  type: "function" as const,
+  function: {
+    name: "remote_task",
+    description: "Delegate a task to a remote Tiger Cowork instance running on another machine. Use this to offload work to a cloud PC or any reachable Tiger Cowork server. The remote agent will process the task using its own LLM and tools, and return the result.",
+    parameters: {
+      type: "object",
+      properties: {
+        instance: {
+          type: "string",
+          description: "Name or ID of a saved remote instance (from Settings > Remote Instances), OR an inline JSON string with {url, token} for ad-hoc use (e.g. '{\"url\":\"http://1.2.3.4:3001\",\"token\":\"abc123\"}').",
+        },
+        task: { type: "string", description: "The task to delegate to the remote agent" },
+        idle_timeout: { type: "number", description: "Seconds of silence (no new messages) before aborting (default: 60)" },
+        max_timeout: { type: "number", description: "Hard cap in seconds regardless of activity (default: 1800)" },
+      },
+      required: ["instance", "task"],
     },
   },
 };
@@ -513,6 +536,19 @@ export async function getTools(opts?: { excludeSubagent?: boolean }) {
   if (settings.subAgentEnabled) {
     tools.push(...protocolTools);
   }
+  if (settings.remoteInstances && settings.remoteInstances.length > 0) {
+    // Build dynamic description with available instances and responsibilities
+    const instanceList = settings.remoteInstances.map((inst: any) => {
+      let line = `  - "${inst.name}"`;
+      if (inst.persona) line += ` (${inst.persona})`;
+      if (inst.responsibility) line += ` — Responsibility: ${inst.responsibility}`;
+      return line;
+    }).join("\n");
+    const dynTool = JSON.parse(JSON.stringify(remoteTaskTool));
+    dynTool.function.description = remoteTaskTool.function.description +
+      `\n\nAvailable remote instances:\n${instanceList}\n\nHOW TO CHOOSE: Match the task to each instance's Responsibility first. If no clear match, use Persona (expertise/skills). If only one instance exists, use that one.`;
+    tools.push(dynTool);
+  }
   return [...tools, ...getMcpTools()];
 }
 
@@ -529,9 +565,22 @@ export async function getManualAgentConfigSummary(): Promise<string | null> {
   if (mode === "p2p") {
     summary += `P2P governance: ${config.system?.p2p_governance?.consensus_mechanism || "contract_net"} — coordination via blackboard.\n`;
   }
+  const remoteInstances = settings.remoteInstances || [];
   for (const a of config.agents || []) {
-    const flags = [a.bus?.enabled && "bus", a.mesh?.enabled && "mesh", a.role === "peer" && "peer"].filter(Boolean).join(",");
-    summary += `- ${a.id} ("${a.name}"): ${a.role}${flags ? ` [${flags}]` : ""}${a.persona ? ` — ${a.persona}` : ""}\n`;
+    const flags = [a.bus?.enabled && "bus", a.mesh?.enabled && "mesh", a.role === "peer" && "peer", a.type === "remote" && `REMOTE → ${a.remote_instance || a.remote_url || "inline"}`].filter(Boolean).join(",");
+    let persona = a.persona || "";
+    let responsibility = "";
+    // For remote agents, use persona/responsibility from Settings if not defined in YAML
+    if (a.type === "remote" && a.remote_instance) {
+      const ri = remoteInstances.find((i: any) => i.id === a.remote_instance || i.name === a.remote_instance);
+      if (ri) {
+        if (!persona && ri.persona) persona = ri.persona;
+        if (ri.responsibility) responsibility = ri.responsibility;
+      }
+    }
+    let desc = `- ${a.id} ("${a.name}"): ${a.role}${flags ? ` [${flags}]` : ""}${persona ? ` — ${persona}` : ""}`;
+    if (responsibility) desc += ` | Responsibility: ${responsibility}`;
+    summary += desc + "\n";
   }
 
   if (config.workflow?.sequence && config.workflow.sequence.length > 0) {
@@ -542,7 +591,11 @@ export async function getManualAgentConfigSummary(): Promise<string | null> {
     }
   }
 
-  summary += `\nSpawn agents with agentId parameter. Follow workflow order. Synthesize results into a clear response with headings.\n`;
+  const hasRemote = (config.agents || []).some(a => a.type === "remote");
+  if (hasRemote) {
+    summary += `\nRemote agents run on another machine — spawn them normally with agentId. They delegate via the remote bridge automatically.\n`;
+  }
+  summary += `\nSpawn agents with agentId parameter. Match each sub-task to the agent whose responsibility and persona best fit. Follow workflow order. Synthesize results into a clear response with headings.\n`;
   return summary;
 }
 
@@ -1248,6 +1301,11 @@ interface AgentConfig {
     confidence_domains?: string[];   // domains this agent is confident in
     reputation_score?: number;       // 0-1, initial reputation
   };
+  // Remote agent fields
+  type?: "remote";
+  remote_instance?: string;   // saved instance id/name
+  remote_url?: string;        // inline URL fallback
+  remote_token?: string;      // inline token (for ad-hoc use)
 }
 
 interface P2PGovernanceConfig {
@@ -1933,6 +1991,57 @@ export async function spawnSubagent(
     );
     resolvedConnections = systemConfig?.connections;
     resolvedSystemConfig = systemConfig;
+
+    // --- Remote agent: delegate to Machine B via HTTP bridge ---
+    if (agentDef?.type === "remote") {
+      const instances = settings.remoteInstances || [];
+      let instance: RemoteInstance | undefined;
+
+      if (agentDef.remote_instance) {
+        instance = instances.find((i: RemoteInstance) => i.id === agentDef.remote_instance || i.name === agentDef.remote_instance);
+      }
+      if (!instance && agentDef.remote_url && agentDef.remote_token) {
+        instance = { id: "inline", name: agentDef.id, url: agentDef.remote_url, token: agentDef.remote_token };
+      }
+      if (!instance) {
+        const result = { ok: false, error: `Remote agent "${agentDef.id}" has no resolvable instance. Configure remote_instance in YAML or add the instance in Settings > Remote Instances.` };
+        activeSubagents.delete(subagentId);
+        return result;
+      }
+
+      console.log(`[SubAgent:${label}] Delegating to remote instance "${instance.name}" (${instance.url})`);
+      if (subagentStatusCallback) {
+        subagentStatusCallback({ sessionId: parentSessionId, status: "subagent_tool", subagentId, label, depth: currentDepth + 1, tool: "remote_task", remote: true });
+      }
+      try {
+        const remoteSettings = await getSettings();
+        const result = await remoteTask(instance, args.task, {
+          pollIntervalMs: (remoteSettings.remotePollInterval ?? 2) * 1000,
+          idleTimeoutMs: (remoteSettings.remoteIdleTimeout ?? 60) * 1000,
+          maxTimeoutMs: (remoteSettings.remoteMaxTimeout ?? 1800) * 1000,
+          signal,
+          onProgress: (newEntries) => {
+            if (subagentStatusCallback) {
+              for (const entry of newEntries) {
+                if (/Still working\.\.\./.test(entry)) continue;
+                subagentStatusCallback({ sessionId: parentSessionId, status: "subagent_tool", subagentId, label, depth: currentDepth + 1, tool: "remote_progress", content: entry, remote: true });
+              }
+            }
+          },
+        });
+        if (subagentStatusCallback) {
+          subagentStatusCallback({ sessionId: parentSessionId, status: "subagent_done", subagentId, label, depth: currentDepth + 1, remote: true });
+        }
+        activeSubagents.delete(subagentId);
+        return result;
+      } catch (err: any) {
+        if (subagentStatusCallback) {
+          subagentStatusCallback({ sessionId: parentSessionId, status: "subagent_done", subagentId, label, depth: currentDepth + 1, remote: true });
+        }
+        activeSubagents.delete(subagentId);
+        return { ok: false, error: err.message };
+      }
+    }
 
     if (agentDef && systemConfig) {
       resolvedAgentDef = agentDef;
@@ -2990,6 +3099,54 @@ async function realtimeSendTask(args: { to: string; task: string; context?: stri
     }
   }
 
+  // Remote agent routing — delegate to remote instance instead of local bus
+  if (targetAgent.agentDef.type === "remote") {
+    const settings = await getSettings();
+    const instances = settings.remoteInstances || [];
+    let instance: RemoteInstance | undefined;
+    if (targetAgent.agentDef.remote_instance) {
+      instance = instances.find((i: RemoteInstance) => i.id === targetAgent.agentDef.remote_instance || i.name === targetAgent.agentDef.remote_instance);
+    }
+    if (!instance && targetAgent.agentDef.remote_url && targetAgent.agentDef.remote_token) {
+      instance = { id: "inline", name: targetAgent.agentDef.id, url: targetAgent.agentDef.remote_url, token: targetAgent.agentDef.remote_token };
+    }
+    if (!instance) {
+      return { ok: false, error: `Remote agent "${args.to}" has no resolvable instance. Configure remote_instance or remote_url+remote_token.` };
+    }
+    console.log(`[Realtime] ${_currentAgentId} → send_task → REMOTE ${args.to} (${instance.url})`);
+    const remoteLabel = targetAgent.agentDef.name || args.to;
+    if (subagentStatusCallback) {
+      subagentStatusCallback({ sessionId, status: "running", agentId: args.to, label: remoteLabel, content: `Remote task → ${instance.name || instance.url}` });
+    }
+    try {
+      const rtSettings = await getSettings();
+      const result = await remoteTask(instance, args.task, {
+        pollIntervalMs: (rtSettings.remotePollInterval ?? 2) * 1000,
+        idleTimeoutMs: (rtSettings.remoteIdleTimeout ?? 60) * 1000,
+        maxTimeoutMs: (rtSettings.remoteMaxTimeout ?? 1800) * 1000,
+        signal,
+        onProgress: (newEntries) => {
+          if (subagentStatusCallback) {
+            for (const entry of newEntries) {
+              // Skip heartbeat "Still working..." entries — they're just keep-alive
+              if (/Still working\.\.\./.test(entry)) continue;
+              subagentStatusCallback({ sessionId, status: "running", agentId: args.to, label: remoteLabel, content: entry });
+            }
+          }
+        },
+      });
+      if (subagentStatusCallback) {
+        subagentStatusCallback({ sessionId, status: "done", agentId: args.to, label: targetAgent.agentDef.name || args.to, content: result.ok ? (result.result || "").slice(0, 200) : result.error });
+      }
+      return { ok: result.ok, agentId: args.to, agentName: targetAgent.agentDef.name, result: result.result, error: result.error };
+    } catch (err: any) {
+      if (subagentStatusCallback) {
+        subagentStatusCallback({ sessionId, status: "error", agentId: args.to, label: targetAgent.agentDef.name || args.to, content: err.message });
+      }
+      return { ok: false, agentId: args.to, error: err.message };
+    }
+  }
+
   // If target is a human node, route output to client via callback (not LLM loop)
   if (targetAgent.agentDef.role === "human") {
     console.log(`[Realtime] ${_currentAgentId} → send_task → HUMAN (${args.to}): ${args.task.slice(0, 100)}`);
@@ -3261,10 +3418,22 @@ export async function getRealtimeAgentConfigSummary(): Promise<string | null> {
   }
 
   // Agent list (compact)
+  const rtRemoteInstances = settings.remoteInstances || [];
   summary += `\nAgents:\n`;
   for (const a of config.agents || []) {
-    const flags = [a.bus?.enabled && "bus", a.mesh?.enabled && "mesh"].filter(Boolean).join(",");
-    summary += `- ${a.id} ("${a.name}"): ${a.role}${flags ? ` [${flags}]` : ""}${a.persona ? ` — ${a.persona}` : ""}\n`;
+    const flags = [a.bus?.enabled && "bus", a.mesh?.enabled && "mesh", a.type === "remote" && `REMOTE → ${a.remote_instance || a.remote_url || "inline"}`].filter(Boolean).join(",");
+    let persona = a.persona || "";
+    let responsibility = "";
+    if (a.type === "remote" && a.remote_instance) {
+      const ri = rtRemoteInstances.find((i: any) => i.id === a.remote_instance || i.name === a.remote_instance);
+      if (ri) {
+        if (!persona && ri.persona) persona = ri.persona;
+        if (ri.responsibility) responsibility = ri.responsibility;
+      }
+    }
+    let desc = `- ${a.id} ("${a.name}"): ${a.role}${flags ? ` [${flags}]` : ""}${persona ? ` — ${persona}` : ""}`;
+    if (responsibility) desc += ` | Responsibility: ${responsibility}`;
+    summary += desc + "\n";
   }
 
   // Connections
@@ -3280,7 +3449,7 @@ export async function getRealtimeAgentConfigSummary(): Promise<string | null> {
     }).join(" | ")}\n`;
   }
 
-  // Delegation instructions (compact)
+  // Delegation instructions — realtime mode uses connections, not free choice
   summary += `\nDelegation: `;
   if (isP2P) {
     const peerIds = (config.agents || []).filter((a: AgentConfig) => a.role !== "human").map(a => a.id);
@@ -3290,6 +3459,7 @@ export async function getRealtimeAgentConfigSummary(): Promise<string | null> {
   } else {
     summary += `Use send_task/wait_result to assign work. Send to multiple agents for parallel execution.\n`;
   }
+  summary += `\nTools: send_task/wait_result = assign work (choose by responsibility/persona). proto_tcp = private DM. proto_bus = broadcast. bb_* = P2P auction then send_task to winner. Remote agents [REMOTE] use send_task normally.\n`;
   summary += `Synthesize agent results into a clear response with headings. Mention any generated files. Use run_python for charts/reports when appropriate.\n`;
   return summary;
 }
@@ -3354,6 +3524,48 @@ export async function callTool(name: string, args: any, signal?: AbortSignal, ta
     case "clawhub_search": return clawhubSearchTool(args);
     case "clawhub_install": return clawhubInstallTool(args);
     case "spawn_subagent": return spawnSubagent(args, _currentParentSessionId, _currentSubagentDepth);
+
+    case "remote_task": {
+      const settings = await getSettings();
+      const instances = settings.remoteInstances || [];
+      let instance: RemoteInstance | undefined;
+
+      // Try to match by id or name from saved instances
+      instance = instances.find((i: RemoteInstance) => i.id === args.instance || i.name === args.instance);
+
+      // Fallback: try to parse as inline JSON {url, token}
+      if (!instance && args.instance) {
+        try {
+          const parsed = JSON.parse(args.instance);
+          if (parsed.url && parsed.token) {
+            instance = { id: "inline", name: "inline", url: parsed.url, token: parsed.token };
+          }
+        } catch { /* not JSON */ }
+      }
+
+      if (!instance) {
+        return { ok: false, error: `Remote instance "${args.instance}" not found. Add it in Settings > Remote Instances or pass inline JSON {url, token}.` };
+      }
+
+      const rtSettings = await getSettings();
+      const idleMs = args.idle_timeout ? args.idle_timeout * 1000 : (rtSettings.remoteIdleTimeout ?? 60) * 1000;
+      const maxMs = args.max_timeout ? args.max_timeout * 1000 : (rtSettings.remoteMaxTimeout ?? 1800) * 1000;
+      const pollMs = (rtSettings.remotePollInterval ?? 2) * 1000;
+      return remoteTask(instance, args.task, {
+        pollIntervalMs: pollMs,
+        idleTimeoutMs: idleMs,
+        maxTimeoutMs: maxMs,
+        signal,
+        onProgress: (newEntries) => {
+          if (subagentStatusCallback) {
+            for (const entry of newEntries) {
+              if (/Still working\.\.\./.test(entry)) continue;
+              subagentStatusCallback({ sessionId: _currentParentSessionId, status: "running", agentId: _currentAgentId, label: instance!.name || "remote", content: entry });
+            }
+          }
+        },
+      });
+    }
 
     // ─── Realtime Agent Tools ───
     case "send_task": return realtimeSendTask(args, signal);
