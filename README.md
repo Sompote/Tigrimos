@@ -2,11 +2,11 @@
   <img src="tiger_cowork/picture/banner_tigrimos.png" alt="TigrimOS Banner" width="100%">
 </p>
 
-# TigrimOS v1.0.0
+# TigrimOS v1.1.0
 
-A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, and a skill marketplace. Runs on **macOS** and **Windows**. Everything executes inside a **secure Ubuntu sandbox** — no Docker required.
+A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, **cross-machine remote agents**, and a skill marketplace. Runs on **macOS** and **Windows**. Everything executes inside a **secure Ubuntu sandbox** — no Docker required.
 
-AI-generated code and shell commands **cannot escape the sandbox** or touch your files without permission. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
+AI-generated code and shell commands **cannot escape the sandbox** or touch your files without permission. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. **Delegate tasks to remote TigrimOS instances** running on other machines — the orchestrator chooses the right agent based on persona and responsibility. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
 
 > **Security first:** Everything runs inside a real Ubuntu sandbox. Your host file system is completely invisible to the AI unless you explicitly share a folder.
 
@@ -158,8 +158,9 @@ Click **Test Connection** in Settings. If it succeeds, you're ready to chat.
 - **AI Chat with 16 Built-in Tools** — web search, Python, React, shell, files, skills, sub-agents
 - **Mix Any Model per Agent** — assign different AI providers per agent (API, Claude Code CLI, Codex CLI)
 - **Parallel Multi-Agent System** — 7 orchestration topologies, 4 communication protocols, P2P swarm governance
+- **Remote Agents** — delegate tasks to TigrimOS instances on other machines; orchestrator auto-selects agents by persona and responsibility
 - **Built-in Terminal** — full xterm.js terminal with root access to the Ubuntu sandbox (install packages, manage services, run CLI tools)
-- **Minecraft Task Monitor** — live pixel-art characters with speech bubbles showing agent activity
+- **Minecraft Task Monitor** — live pixel-art characters with speech bubbles showing agent activity and remote progress
 - **Long-Running Session Stability** — sliding window compression, smart tool result handling, checkpoint recovery
 - **MCP Integration** — connect any Model Context Protocol server (Stdio, SSE, StreamableHTTP)
 - **Output Panel** — renders React components, charts, HTML, PDF, Word, Excel, images, and Markdown
@@ -231,6 +232,53 @@ You can mix them in a **multi-agent swarm** — for example, one agent using `cl
 
 > **Note:** All CLI tools run **inside the sandbox** — they cannot access your host system. API keys and credentials are isolated from your host environment.
 
+## Remote Agents (New in v1.1.0)
+
+TigrimOS instances can delegate tasks to each other across machines. Any TigrimOS instance can be both an orchestrator and a remote worker — fully peer-to-peer.
+
+```
+Machine A (Home Mac)                    Machine B (Cloud PC)
+─────────────────────                   ─────────────────────
+TigrimOS running                        TigrimOS running
+Settings → Remote Instances:            Settings → Remote Instances:
+  - cloud-pc → http://B:3001             - home-mac → http://A:3001
+
+Agent Editor YAML:                      Agent Editor YAML:
+  - id: cloud-researcher                  - id: home-coder
+    type: remote                            type: remote
+    remote_instance: cloud-pc               remote_instance: home-mac
+```
+
+### Setup
+
+1. **Both machines** run TigrimOS (same codebase, same app)
+2. On Machine A, go to **Settings → Remote Instances** → add Machine B's URL and bridge token
+3. On Machine B, go to **Settings → Remote Bridge Tokens** → create a token and share it with Machine A
+4. In the **Agent Editor**, add an agent with type **Remote** and select the saved instance from the dropdown
+5. Set **Persona** and **Responsibility** on the remote agent — the orchestrator uses these to decide which agent gets which task
+
+### How It Works
+
+- The orchestrator reads each agent's **responsibility** (what tasks it handles) and **persona** (expertise/skills) to choose the right agent
+- Remote tasks are sent via HTTP polling with configurable timeouts:
+
+  | Setting | Default | Description |
+  |---------|---------|-------------|
+  | Poll Interval | 2s | How often to check for remote agent progress |
+  | Idle Timeout | 60s | Abort if no progress for this long |
+  | Max Timeout | 1800s | Hard cap regardless of activity |
+
+- Configure timeouts in **Settings → Remote Agent Timeouts**
+- Remote agent progress appears live in the **Minecraft Task Monitor** with speech bubbles
+
+### Three Ways to Use Remote Agents
+
+| Mode | Tool | How |
+|------|------|-----|
+| **Spawn Agent** (YAML) | `spawn_subagent` | Define remote agents in YAML → orchestrator spawns them by agentId |
+| **Live Session** (YAML) | `send_task` / `wait_result` | Persistent sessions with protocol tools (TCP, Bus, Mesh) |
+| **Direct** | `remote_task` | AI picks a remote instance directly from the available list |
+
 ## Security Model
 
 TigrimOS runs inside a full sandbox on both platforms:
@@ -296,7 +344,7 @@ wsl -d TigrimOS -u root -- bash -c "mkdir -p /opt/TigrimOS/tiger_cowork/shared &
 │  │  ┌──────────────────────────────────────┐  │  │
 │  │  │        Ubuntu 22.04 VM               │  │  │
 │  │  │                                      │  │  │
-│  │  │   TigrimOS v1.0.0                   │  │  │
+│  │  │   TigrimOS v1.1.0                   │  │  │
 │  │  │   ├── Fastify server :3001          │  │  │
 │  │  │   ├── Node.js 20                    │  │  │
 │  │  │   ├── Python 3 + numpy/pandas/...   │  │  │
@@ -326,7 +374,7 @@ wsl -d TigrimOS -u root -- bash -c "mkdir -p /opt/TigrimOS/tiger_cowork/shared &
 │  │  ┌──────────────────────────────────────┐  │  │
 │  │  │     Ubuntu 22.04 "TigrimOS" distro  │  │  │
 │  │  │                                      │  │  │
-│  │  │   TigrimOS v1.0.0                   │  │  │
+│  │  │   TigrimOS v1.1.0                   │  │  │
 │  │  │   ├── Fastify server :3001          │  │  │
 │  │  │   ├── Node.js 20                    │  │  │
 │  │  │   ├── Python 3 + numpy/pandas/...   │  │  │

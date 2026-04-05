@@ -253,9 +253,8 @@ function AgentDefPanel({
             </>
           )}
 
-          {/* Model, Persona, Responsibilities — hidden for human and remote nodes */}
+          {/* Model — hidden for human and remote nodes */}
           {agent.role !== "human" && !agent.isRemote && (
-            <>
               <div className="form-group">
                 <label className="model-checkbox-label">
                   <input
@@ -369,8 +368,13 @@ function AgentDefPanel({
                   </>
                 )}
               </div>
+          )}
+
+          {/* Persona, Responsibilities — shown for all non-human agents (including remote) */}
+          {agent.role !== "human" && (
+            <>
               <div className="form-group">
-                <label>Persona</label>
+                <label>Persona{agent.isRemote ? " (for orchestrator reference only)" : ""}</label>
                 <textarea
                   value={agent.persona}
                   onChange={(e) => onUpdate({ ...agent, persona: e.target.value })}
@@ -379,7 +383,7 @@ function AgentDefPanel({
                 />
               </div>
               <div className="form-group">
-                <label>Responsibilities (one per line)</label>
+                <label>Responsibilities (one per line){agent.isRemote ? " — used by orchestrator to choose this agent" : ""}</label>
                 <textarea
                   value={agent.responsibilities.join("\n")}
                   onChange={(e) => onUpdate({ ...agent, responsibilities: e.target.value.split("\n").filter(Boolean) })}
@@ -1110,8 +1114,8 @@ export default function AgentEditor({
           if (a.remoteToken) agentDef.remote_token = a.remoteToken;
         }
         if (a.model && !a.isRemote) agentDef.model = a.model;
-        if (a.persona && !a.isRemote) agentDef.persona = a.persona;
-        if (a.responsibilities.length > 0 && !a.isRemote) agentDef.responsibilities = a.responsibilities;
+        if (a.persona) agentDef.persona = a.persona;
+        if (a.responsibilities.length > 0) agentDef.responsibilities = a.responsibilities;
         if (a.busEnabled) {
           agentDef.bus = {
             enabled: true,
