@@ -1552,8 +1552,9 @@ export async function callTigerBotWithTools(
       }
 
       // Also nudge if the LLM stops with incomplete-sounding content (even without explicit errors)
+      // Skip nudge on round 0 with no tool calls — the model is just answering a conversational question
       const contentLooksIncomplete = /\b(will now|next step|let me|i('ll| will)|working on|in progress|wait for)\b/i.test(message.content || "");
-      if (contentLooksIncomplete && errorRecoveryAttempts < maxErrorRecoveries && round < maxToolRounds - 1) {
+      if (contentLooksIncomplete && totalToolCalls > 0 && errorRecoveryAttempts < maxErrorRecoveries && round < maxToolRounds - 1) {
         errorRecoveryAttempts++;
         console.log(`[ToolLoop] LLM stopped with incomplete-sounding response. Nudging to continue (attempt ${errorRecoveryAttempts}/${maxErrorRecoveries})...`);
         allMessages.push({
