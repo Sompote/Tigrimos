@@ -32,11 +32,13 @@ AI-generated code and shell commands **cannot escape the sandbox** or touch your
 
 ## Downloads
 
-| Platform | File | Sandbox Technology |
-|----------|------|--------------------|
-| macOS — Apple Silicon (M1/M2/M3/M4) | **`TigrimOS.app`** | Apple Virtualization.framework |
-| macOS — Intel | **`TigrimOS_i.app`** | Apple Virtualization.framework |
-| Windows 10/11 | **`TigrimOSInstaller.bat`** | WSL2 (Windows Subsystem for Linux) |
+Download from the [latest release](https://github.com/Sompote/Tigrimos/releases/tag/v1.1.0):
+
+| Platform | Download | Sandbox Technology |
+|----------|----------|--------------------|
+| macOS — Apple Silicon (M1/M2/M3/M4) | [**TigrimOS-v1.1.0-macOS-AppleSilicon.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.0/TigrimOS-v1.1.0-macOS-AppleSilicon.zip) | Apple Virtualization.framework |
+| macOS — Intel | [**TigrimOS-v1.1.0-macOS-Intel.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.0/TigrimOS-v1.1.0-macOS-Intel.zip) | Apple Virtualization.framework |
+| Windows 10/11 | [**TigrimOS-v1.1.0-Windows.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.0/TigrimOS-v1.1.0-Windows.zip) | WSL2 (Windows Subsystem for Linux) |
 
 ## Requirements
 
@@ -66,9 +68,9 @@ AI-generated code and shell commands **cannot escape the sandbox** or touch your
    ```bash
    brew install qemu
    ```
-3. Download the release zip for your Mac from [Releases](https://github.com/Sompote/Tigrimos/releases):
-   - **Apple Silicon** (M1/M2/M3/M4): `TigrimOS-v1.1.0-macOS-AppleSilicon.zip`
-   - **Intel**: `TigrimOS-v1.1.0-macOS-Intel.zip`
+3. Download the release zip for your Mac:
+   - **Apple Silicon** (M1/M2/M3/M4): [TigrimOS-v1.1.0-macOS-AppleSilicon.zip](https://github.com/Sompote/Tigrimos/releases/download/v1.1.0/TigrimOS-v1.1.0-macOS-AppleSilicon.zip)
+   - **Intel**: [TigrimOS-v1.1.0-macOS-Intel.zip](https://github.com/Sompote/Tigrimos/releases/download/v1.1.0/TigrimOS-v1.1.0-macOS-Intel.zip)
 4. Unzip — you get `TigrimOS.app` (or `TigrimOS_i.app`) and `tiger_cowork/` folder
 5. Keep both in the **same directory** (the app needs `tiger_cowork/` next to it)
 6. Double-click the `.app` to launch
@@ -79,7 +81,7 @@ That's it. Subsequent launches start in under a minute.
 
 ### Windows — Installer
 
-1. Download or clone the repository
+1. Download and unzip [TigrimOS-v1.1.0-Windows.zip](https://github.com/Sompote/Tigrimos/releases/download/v1.1.0/TigrimOS-v1.1.0-Windows.zip)
 2. Double-click **`TigrimOSInstaller.bat`**
 3. The graphical installer will guide you through:
    - Enabling WSL2 (may require a one-time restart)
