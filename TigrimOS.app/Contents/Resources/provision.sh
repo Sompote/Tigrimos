@@ -48,10 +48,16 @@ echo "[5/6] Setting up TigrimOS..."
 sudo mkdir -p /app
 sudo chown -R tigris:tigris /app
 
-# Copy from VirtioFS mount if available
+# Copy from VirtioFS mount if available, fallback to git clone
 if [ -d /mnt/tiger-cowork ] && [ -f /mnt/tiger-cowork/package.json ]; then
-    echo "  Copying from shared mount..."
+    echo "  Copying from local source..."
     cp -r /mnt/tiger-cowork/* /app/
+else
+    echo "  Local source not found, cloning from GitHub..."
+    sudo apt-get install -y -qq git 2>/dev/null || true
+    git clone --depth 1 https://github.com/Sompote/TigrimOS.git /tmp/tigris-src
+    cp -r /tmp/tigris-src/tiger_cowork/* /app/
+    rm -rf /tmp/tigris-src
     cd /app
     npm install --ignore-scripts --omit=dev
     if [ -d client ]; then

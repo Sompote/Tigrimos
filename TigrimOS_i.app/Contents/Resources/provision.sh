@@ -1,12 +1,12 @@
 #!/bin/bash
 # TigrimOS VM Provisioning Script
-# Runs inside the Ubuntu VM to set up Tiger Cowork
+# Runs inside the Ubuntu VM to set up TigrimOS
 # This mirrors the Dockerfile setup but for a real Ubuntu VM
 
 set -euo pipefail
 
 echo "=== TigrimOS Provisioning ==="
-echo "Setting up Tiger Cowork in Ubuntu sandbox"
+echo "Setting up TigrimOS in Ubuntu sandbox"
 
 # Update system
 export DEBIAN_FRONTEND=noninteractive
@@ -43,15 +43,21 @@ export PATH="/opt/venv/bin:$PATH"
 echo "[4/6] Installing global npm packages..."
 sudo npm i -g clawhub tsx
 
-# Setup Tiger Cowork
-echo "[5/6] Setting up Tiger Cowork..."
+# Setup TigrimOS
+echo "[5/6] Setting up TigrimOS..."
 sudo mkdir -p /app
 sudo chown -R tigris:tigris /app
 
-# Copy from VirtioFS mount if available
+# Copy from VirtioFS mount if available, fallback to git clone
 if [ -d /mnt/tiger-cowork ] && [ -f /mnt/tiger-cowork/package.json ]; then
-    echo "  Copying from shared mount..."
+    echo "  Copying from local source..."
     cp -r /mnt/tiger-cowork/* /app/
+else
+    echo "  Local source not found, cloning from GitHub..."
+    sudo apt-get install -y -qq git 2>/dev/null || true
+    git clone --depth 1 https://github.com/Sompote/TigrimOS.git /tmp/tigris-src
+    cp -r /tmp/tigris-src/tiger_cowork/* /app/
+    rm -rf /tmp/tigris-src
     cd /app
     npm install --ignore-scripts --omit=dev
     if [ -d client ]; then
@@ -64,7 +70,7 @@ fi
 echo "[6/6] Creating systemd service..."
 sudo tee /etc/systemd/system/tiger-cowork.service > /dev/null << 'EOF'
 [Unit]
-Description=Tiger Cowork AI Workspace
+Description=TigrimOS AI Workspace
 After=network.target
 
 [Service]
@@ -112,4 +118,4 @@ sudo chmod +x /usr/local/bin/mount-shared-folders.sh
 # Signal provisioning complete
 sudo touch /var/lib/tigris-provisioned
 echo "=== TigrimOS Provisioning Complete ==="
-echo "Tiger Cowork running at http://localhost:3001"
+echo "TigrimOS running at http://localhost:3001"

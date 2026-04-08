@@ -94,6 +94,30 @@ That's it. Subsequent launches start in under a minute.
 
 After installation, use **`TigrimOSStart.bat`** (or the desktop shortcut) to launch and **`TigrimOSStop.bat`** to stop.
 
+### Install from Git (Alternative)
+
+If you prefer to install from source instead of downloading the release zip:
+
+**macOS:**
+```bash
+git clone https://github.com/Sompote/TigrimOS.git
+cd TigrimOS
+xattr -cr TigrimOS.app        # Apple Silicon (M1/M2/M3/M4)
+open TigrimOS.app
+# or
+xattr -cr TigrimOS_i.app      # Intel
+open TigrimOS_i.app
+```
+
+**Windows:**
+```powershell
+git clone https://github.com/Sompote/TigrimOS.git
+cd TigrimOS
+powershell -ExecutionPolicy Bypass -File install_windows.ps1
+```
+
+> **Note (macOS):** Run the app from inside the cloned folder — `tiger_cowork/` must be next to the `.app` for the VM to find it.
+
 ## Quick Start
 
 1. **Launch** TigrimOS

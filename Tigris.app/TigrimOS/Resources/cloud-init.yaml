@@ -34,11 +34,17 @@ runcmd:
   # Install clawhub CLI
   - npm i -g clawhub tsx
 
-  # Setup TigrimOS from shared mount
+  # Setup TigrimOS from shared mount, fallback to git clone
   - mkdir -p /app
   - |
-    if mountpoint -q /mnt/tiger-cowork 2>/dev/null; then
+    if mountpoint -q /mnt/tiger-cowork 2>/dev/null && [ -f /mnt/tiger-cowork/package.json ]; then
+      echo "Copying from local source..."
       cp -r /mnt/tiger-cowork/* /app/
+    else
+      echo "Local source not found, cloning from GitHub..."
+      git clone --depth 1 https://github.com/Sompote/TigrimOS.git /tmp/tigris-src
+      cp -r /tmp/tigris-src/tiger_cowork/* /app/
+      rm -rf /tmp/tigris-src
     fi
   - cd /app && npm install --ignore-scripts --omit=dev 2>/dev/null || true
   - cd /app/client && npm install 2>/dev/null || true

@@ -520,9 +520,16 @@ class VMManager: NSObject, ObservableObject {
               echo "[TigrimOS] Setting up TigrimOS..."
               mkdir -p /app
 
-              # Try to copy from VirtioFS mount
+              # Try to copy from VirtioFS mount, fallback to git clone
               if [ -d /mnt/tiger-cowork ] && [ -f /mnt/tiger-cowork/package.json ]; then
+                echo "[TigrimOS] Copying from local source..."
                 cp -r /mnt/tiger-cowork/* /app/
+              else
+                echo "[TigrimOS] Local source not found, cloning from GitHub..."
+                apt-get install -y -qq git 2>/dev/null || true
+                git clone --depth 1 https://github.com/Sompote/TigrimOS.git /tmp/tigris-src
+                cp -r /tmp/tigris-src/tiger_cowork/* /app/
+                rm -rf /tmp/tigris-src
               fi
 
               cd /app

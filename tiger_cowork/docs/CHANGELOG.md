@@ -37,22 +37,6 @@
 - **Skill marketplace (ClawHub)** — install and manage AI skills
 - **MCP integration** — connect any Model Context Protocol server
 
-## v0.4.3 (2026-04-02)
-**P2P Swarm Governance**
-
-- **P2P Swarm orchestration mode** — New `p2p` orchestration topology where autonomous peer agents self-organize via a shared blackboard. No persistent authority — agents propose tasks, bid with confidence scores, and the best-suited agent wins the work through Contract Net Protocol.
-- **P2P Orchestrator mode** — New `p2p_orchestrator` topology combining hierarchical control with P2P bidding. The orchestrator can delegate directly to connected agents OR post tasks to the blackboard for bidder agents to compete on. Bidder agents without direct connections are only reachable through the bidding workflow.
-- **Combined scoring (50/50)** — Final winner = 50% bidder's self-reported confidence + 50% orchestrator's assessment score. The orchestrator sees each bidder's persona, expertise domains, responsibilities, and reputation when making its judgment.
-- **Blackboard protocol** — Fourth communication protocol alongside TCP, Bus, and Queue. Session-scoped shared workspace with proposals, bids, results, and an append-only audit log.
-- **Active bidder wake-up** — When a task is proposed on the blackboard, bidder agents are automatically woken up and asked to bid via bus notification.
-- **Bidder access control** — In `p2p_orchestrator` mode, the orchestrator cannot bypass bidding by sending tasks directly to bidder-only agents. The system enforces: propose → bid → award → send_task.
-- **Peer agent role** — New `peer` role for P2P swarm agents with per-agent `confidence_domains` and `reputation_score` (0-1). Shown with amber color and PEER badge in the editor.
-- **BIDDER badge** — Agents marked as P2P bidders show a cyan BIDDER badge on their node in the editor.
-- **Mesh-enabled bidders** — Bidder agents with `mesh.enabled: true` can delegate sub-tasks to other agents after winning work.
-- **P2P Governance panel** — Visual configuration in the Agent Editor for bid timeout, minimum confidence threshold, max retries, and audit log toggle.
-- **Six blackboard tools** — `bb_propose`, `bb_bid`, `bb_award`, `bb_complete`, `bb_read`, `bb_log` — injected into peer/bidder agents' toolbox automatically.
-- **Auto Architecture support** — The AI architect can now generate complete P2P swarm configurations from natural language descriptions.
-
 ## v0.4.2
 **MiniMax Built-in Provider**
 
