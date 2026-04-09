@@ -728,25 +728,42 @@ export default function ChatPage() {
     return () => { cancelled = true; clearInterval(iv); };
   }, [showActivityLog, activeSession, isLoading]);
 
-  // Throttled scroll — avoid expensive DOM layout on every chunk
-  // Use interval-based scroll instead of effect-on-streaming to prevent re-renders every 150ms
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ─── Smart scroll: only auto-scroll if user is near the bottom ───
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const userScrolledUpRef = useRef(false);
+
+  // Track whether user has scrolled up from bottom
+  useEffect(() => {
+    const el = chatMessagesRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      userScrolledUpRef.current = distFromBottom > 80;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [activeSession]);
+
   const prevMessagesLenRef = useRef(0);
   useEffect(() => {
-    // Scroll on new messages
     if (messages.length !== prevMessagesLenRef.current) {
       prevMessagesLenRef.current = messages.length;
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      if (!userScrolledUpRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
     }
   }, [messages]);
-  // During streaming, scroll on a fixed interval instead of every state change
+
+  // During streaming, scroll on a fixed interval — only if user hasn't scrolled up
   useEffect(() => {
     if (!streaming) return;
     const iv = setInterval(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      if (!userScrolledUpRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
     }, 500);
     return () => clearInterval(iv);
-  }, [!!streaming]); // only re-run when streaming starts/stops, not on content changes
+  }, [!!streaming]);
 
   const createNewSession = async () => {
     const session = await api.createSession();
@@ -937,7 +954,7 @@ export default function ChatPage() {
                 </div>
               </div>
             )}
-            <div className="chat-messages">
+            <div className="chat-messages" ref={chatMessagesRef}>
               <MessageList messages={messages} onOpenOutput={() => setOutputPanelOpen(true)} />
               <StreamingMessage content={streaming} />
               {status && <div className="chat-status">{status}</div>}
