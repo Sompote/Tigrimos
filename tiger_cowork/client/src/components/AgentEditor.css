@@ -70,18 +70,6 @@
   color: var(--text-secondary, #ccc);
 }
 
-.system-description-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.system-description-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-}
-
 .system-description-input {
   width: 300px;
   padding: 4px 8px;
@@ -94,27 +82,6 @@
   min-height: 36px;
   font-family: inherit;
   line-height: 1.4;
-}
-
-.desc-prompt-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.desc-prompt-input {
-  flex: 1;
-  width: 240px;
-  padding: 4px 8px;
-  font-size: 11px;
-  border: 1px solid rgba(102, 126, 234, 0.4);
-  border-radius: 6px;
-  background: var(--bg-tertiary, #0f3460);
-  color: var(--text-primary, #eee);
-}
-
-.desc-prompt-input::placeholder {
-  color: var(--text-tertiary, #666);
 }
 
 .btn-xs {
