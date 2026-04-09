@@ -37,6 +37,7 @@ Download from the [latest release](https://github.com/Sompote/Tigrimos/releases/
 | Platform | Download | Sandbox Technology |
 |----------|----------|--------------------|
 | macOS — Apple Silicon (M1/M2/M3/M4) | [**TigrimOS-v1.1.1-macOS-AppleSilicon.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.1/TigrimOS-v1.1.1-macOS-AppleSilicon.zip) | Apple Virtualization.framework |
+| macOS — Apple Silicon (macOS 26 Tahoe) | [**TigrimOS-v1.1.1-macOS-Tahoe-AppleSilicon.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.1/TigrimOS-v1.1.1-macOS-Tahoe-AppleSilicon.zip) | Apple Virtualization.framework |
 | macOS — Intel | [**TigrimOS-v1.1.1-macOS-Intel.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.1/TigrimOS-v1.1.1-macOS-Intel.zip) | Apple Virtualization.framework |
 | Windows 10/11 | [**TigrimOS-v1.1.1-Windows.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.1.1/TigrimOS-v1.1.1-Windows.zip) | WSL2 (Windows Subsystem for Linux) |
 

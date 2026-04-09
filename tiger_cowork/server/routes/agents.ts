@@ -26,6 +26,7 @@ export async function agentsRoutes(fastify: FastifyInstance) {
           return {
             filename: f,
             name: parsed?.system?.name || f.replace(/\.ya?ml$/, ""),
+            description: parsed?.system?.description || "",
             agentCount: parsed?.agents?.length || 0,
             updatedAt: fs.statSync(path.join(AGENTS_DIR, f)).mtime.toISOString(),
           };
@@ -151,6 +152,36 @@ Example:
       } else {
         return { ok: false, error: "No response from LLM" };
       }
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Generate a description for an agent system using LLM
+  fastify.post("/generate-description", async (request, reply) => {
+    const { system, prompt } = request.body as any;
+    if (!system) {
+      reply.code(400); return { ok: false, error: "system config is required" };
+    }
+
+    const agents = (system.agents || [])
+      .filter((a: any) => a.role !== "human")
+      .map((a: any) => `${a.name} (${a.role})${a.persona ? `: ${a.persona}` : ""}`)
+      .join("; ");
+    const mode = system.system?.orchestration_mode || "hierarchical";
+
+    const systemContext = `System: "${system.system?.name || "Unnamed"}", mode: ${mode}. Agents: ${agents}.`;
+    const userMessage = prompt
+      ? `${prompt}\n\nContext about the agent system:\n${systemContext}\n\nReturn ONLY the description text, nothing else.`
+      : `Summarize this multi-agent system in ONE short sentence (max 120 chars). ${systemContext} Return ONLY the description text, nothing else.`;
+
+    try {
+      const result = await callTigerBotWithTools(
+        [{ role: "user", content: userMessage }],
+        "You write descriptions of multi-agent systems based on user instructions. Return only the description text with no quotes or formatting.",
+        undefined, undefined, undefined, [],
+      );
+      return { ok: true, description: result.content?.trim() || "" };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }

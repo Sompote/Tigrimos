@@ -192,12 +192,27 @@ class VMManager: NSObject, ObservableObject {
         var storageDevices: [VZStorageDeviceConfiguration] = []
 
         // Main disk (raw format, converted from QCOW2)
-        let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: VMConfig.rawDiskPath, readOnly: false)
+        // macOS 26+ (Tahoe) rejects RAW via DiskImages2, use block device attachment instead
+        let diskAttachment: VZStorageDeviceAttachment
+        if #available(macOS 26.0, *) {
+            let fileHandle = try FileHandle(forUpdating: VMConfig.rawDiskPath)
+            diskAttachment = try VZDiskBlockDeviceStorageDeviceAttachment(
+                fileHandle: fileHandle, readOnly: false, synchronizationMode: .full)
+        } else {
+            diskAttachment = try VZDiskImageStorageDeviceAttachment(url: VMConfig.rawDiskPath, readOnly: false)
+        }
         storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: diskAttachment))
 
         // Cloud-init seed ISO (read-only)
         if FileManager.default.fileExists(atPath: VMConfig.seedISOPath.path) {
-            let seedAttachment = try VZDiskImageStorageDeviceAttachment(url: VMConfig.seedISOPath, readOnly: true)
+            let seedAttachment: VZStorageDeviceAttachment
+            if #available(macOS 26.0, *) {
+                let seedHandle = try FileHandle(forReadingFrom: VMConfig.seedISOPath)
+                seedAttachment = try VZDiskBlockDeviceStorageDeviceAttachment(
+                    fileHandle: seedHandle, readOnly: true, synchronizationMode: .none)
+            } else {
+                seedAttachment = try VZDiskImageStorageDeviceAttachment(url: VMConfig.seedISOPath, readOnly: true)
+            }
             storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: seedAttachment))
         }
 

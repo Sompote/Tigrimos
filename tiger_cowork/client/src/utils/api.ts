@@ -45,6 +45,7 @@ export const api = {
   // Chat
   getSessions: () => request("/chat/sessions"),
   getSession: (id: string) => request(`/chat/sessions/${id}`),
+  getActivityLog: (id: string) => request(`/chat/sessions/${id}/activity`),
   createSession: (title?: string) => request("/chat/sessions", { method: "POST", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => request(`/chat/sessions/${id}`, { method: "DELETE" }),
   renameSession: (id: string, title: string) => request(`/chat/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
@@ -203,4 +204,6 @@ export const api = {
   generateAgentDefinition: (description: string) => request("/agents/generate-definition", { method: "POST", body: JSON.stringify({ description }) }),
   generateAgentSystem: (description: string, architectureType?: string, agentCount?: string) =>
     request("/agents/generate-system", { method: "POST", body: JSON.stringify({ description, architectureType, agentCount }) }),
+  generateAgentDescription: (system: any, prompt?: string) =>
+    request("/agents/generate-description", { method: "POST", body: JSON.stringify({ system, prompt }) }),
 };

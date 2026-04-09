@@ -602,17 +602,20 @@ export default function SettingsPage() {
                   <option value="auto">Auto (AI decides)</option>
                   <option value="manual">Spawn Agent (YAML config file)</option>
                   <option value="realtime">Realtime Agent (YAML config file)</option>
+                  <option value="auto_swarm">Auto Choose Swarm (AI picks config)</option>
                 </select>
                 <p className="hint">
                   {settings.subAgentMode === "realtime"
                     ? "All agents boot at session start and stay alive — tasks are sent via bus for true parallel execution"
                     : settings.subAgentMode === "manual"
                     ? "Agents are defined by a YAML configuration file you provide"
+                    : settings.subAgentMode === "auto_swarm"
+                    ? "The AI analyzes your task and selects the best agent swarm from your saved YAML configurations"
                     : "The AI automatically spawns and manages sub-agents as needed"}
                 </p>
               </div>
 
-              {(settings.subAgentMode === "manual" || settings.subAgentMode === "realtime") ? (
+              {(settings.subAgentMode === "manual" || settings.subAgentMode === "realtime" || settings.subAgentMode === "auto_swarm") ? (
                 <>
                   {/* Manual YAML Config */}
                   <div className="form-group">

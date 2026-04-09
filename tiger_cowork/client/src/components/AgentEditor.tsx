@@ -47,6 +47,7 @@ interface Connection {
 
 interface EditorState {
   systemName: string;
+  systemDescription: string;
   orchestrationMode: string;
   agents: AgentNode[];
   connections: Connection[];
@@ -615,6 +616,7 @@ export default function AgentEditor({
 
   const [state, setState] = useState<EditorState>({
     systemName: "Multi-Agent System",
+    systemDescription: "",
     orchestrationMode: "hierarchical",
     agents: [],
     connections: [],
@@ -644,6 +646,9 @@ export default function AgentEditor({
   const [autoArchCount, setAutoArchCount] = useState("auto");
   const [autoArchGenerating, setAutoArchGenerating] = useState(false);
   const [autoArchResult, setAutoArchResult] = useState<any>(null);
+  const [generatingDesc, setGeneratingDesc] = useState(false);
+  const [showDescPrompt, setShowDescPrompt] = useState(false);
+  const [descPromptText, setDescPromptText] = useState("");
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -740,6 +745,7 @@ export default function AgentEditor({
     const p2pGov = sys.system?.p2p_governance;
     setState({
       systemName: sys.system?.name || "Auto-Generated System",
+      systemDescription: sys.system?.description || "",
       orchestrationMode: sys.system?.orchestration_mode || autoArchType,
       agents,
       connections,
@@ -830,7 +836,7 @@ export default function AgentEditor({
       await loadExistingFiles();
       // If the deleted file is currently loaded, clear the editor
       if (filename === fname.replace(/\.ya?ml$/i, "")) {
-        setState({ systemName: "Multi-Agent System", orchestrationMode: "hierarchical", agents: [], connections: [], p2pGovernance: defaultP2PGovernance });
+        setState({ systemName: "Multi-Agent System", systemDescription: "", orchestrationMode: "hierarchical", agents: [], connections: [], p2pGovernance: defaultP2PGovernance });
         setFilename("agents");
       }
     } catch (err: any) {
@@ -914,6 +920,7 @@ export default function AgentEditor({
           const loadedP2PGov = parsed.system?.p2p_governance;
           setState({
             systemName: parsed.system?.name || "Multi-Agent System",
+            systemDescription: parsed.system?.description || "",
             orchestrationMode: parsed.system?.orchestration_mode || "hierarchical",
             agents,
             connections,
@@ -1085,6 +1092,7 @@ export default function AgentEditor({
   const buildYamlObject = () => {
     const systemDef: any = {
       name: state.systemName,
+      ...(state.systemDescription ? { description: state.systemDescription } : {}),
       orchestration_mode: state.orchestrationMode,
       communication_protocol: "structured_handoff",
       context_passing: "full_chain",
@@ -1310,6 +1318,59 @@ export default function AgentEditor({
                 <option value="p2p">P2P Swarm</option>
                 <option value="p2p_orchestrator">P2P Orchestrator</option>
               </select>
+              <div className="system-description-section">
+                <div className="system-description-row">
+                  <textarea
+                    className="system-description-input"
+                    value={state.systemDescription}
+                    onChange={(e) => setState((s) => ({ ...s, systemDescription: e.target.value }))}
+                    placeholder="System description (used by Auto Choose Swarm)..."
+                    rows={3}
+                  />
+                  <button
+                    className="btn btn-xs btn-secondary"
+                    title="Auto-generate description with AI"
+                    disabled={generatingDesc}
+                    onClick={() => setShowDescPrompt((v) => !v)}
+                  >
+                    {generatingDesc ? "..." : "Auto"}
+                  </button>
+                </div>
+                {showDescPrompt && (
+                  <div className="desc-prompt-row">
+                    <input
+                      className="desc-prompt-input"
+                      value={descPromptText}
+                      onChange={(e) => setDescPromptText(e.target.value)}
+                      placeholder="Enter a prompt for AI to generate description..."
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !generatingDesc) {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).closest(".desc-prompt-row")
+                            ?.querySelector<HTMLButtonElement>("button")?.click();
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn btn-xs btn-primary"
+                      disabled={generatingDesc}
+                      onClick={async () => {
+                        setGeneratingDesc(true);
+                        try {
+                          const yamlObj = buildYamlObject();
+                          const res = await api.generateAgentDescription(yamlObj, descPromptText || undefined);
+                          if (res.ok && res.description) {
+                            setState((s) => ({ ...s, systemDescription: res.description }));
+                          }
+                        } catch {}
+                        setGeneratingDesc(false);
+                      }}
+                    >
+                      Generate
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div className="editor-toolbar-right">

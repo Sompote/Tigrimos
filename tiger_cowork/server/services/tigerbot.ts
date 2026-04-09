@@ -1316,7 +1316,7 @@ export async function callTigerBotWithTools(
     let overloadRetryCount = 0;
     for (let llmRetry = 0; llmRetry < llmMaxRetries; llmRetry++) {
       try {
-        data = await llmCall(allMessages, { tools: toolsOverride || await getTools(), signal, model: modelOverride });
+        data = await llmCall(allMessages, { tools: toolsOverride || await getTools({ sessionId }), signal, model: modelOverride });
         break; // success
       } catch (err: any) {
         if (err.name === "AbortError") {
@@ -1572,8 +1572,9 @@ export async function callTigerBotWithTools(
     // Loop detection: same tools with same args called 3 rounds in a row → stop
     // Use tool names + truncated args hash to distinguish explore vs chart vs fix
     // Skip loop detection for agent coordination tools — send_task/wait_result naturally repeat
-    const agentCoordTools = new Set(["send_task", "wait_result", "check_agents"]);
-    const hasNonAgentTool = toolCalls.some((tc: any) => !agentCoordTools.has(tc.function?.name || ""));
+    const agentCoordTools = new Set(["send_task", "wait_result", "check_agents", "spawn_subagent", "select_swarm"]);
+    const isAgentCoordTool = (name: string) => agentCoordTools.has(name) || name.startsWith("spawn_");
+    const hasNonAgentTool = toolCalls.some((tc: any) => !isAgentCoordTool(tc.function?.name || ""));
     const currentSignature = toolCalls.map((tc: any) => {
       const name = tc.function?.name || "";
       const args = tc.function?.arguments || "";
@@ -1643,10 +1644,11 @@ export async function callTigerBotWithTools(
       parsedToolCalls.push({ tc, fnName, fnArgs });
     }
 
-    // Separate parallelizable calls (spawn_subagent, send_task, wait_result) from sequential ones
+    // Separate parallelizable calls (spawn_subagent, spawn_<agentId>, send_task, wait_result) from sequential ones
     const parallelToolNames = new Set(["spawn_subagent", "send_task", "wait_result"]);
-    const subagentCalls = parsedToolCalls.filter(p => parallelToolNames.has(p.fnName));
-    const otherCalls = parsedToolCalls.filter(p => !parallelToolNames.has(p.fnName));
+    const isParallelTool = (name: string) => parallelToolNames.has(name) || name.startsWith("spawn_");
+    const subagentCalls = parsedToolCalls.filter(p => isParallelTool(p.fnName));
+    const otherCalls = parsedToolCalls.filter(p => !isParallelTool(p.fnName));
 
     // Helper to execute a single tool call and record result
     const executeTool = async (parsed: { tc: any; fnName: string; fnArgs: any }) => {
@@ -1888,7 +1890,7 @@ Scoring guide:
         for (let round = 0; round < retryMaxRounds; round++) {
           let data: any;
           try {
-            data = await llmCall(allMessages, { tools: await getTools() });
+            data = await llmCall(allMessages, { tools: await getTools({ sessionId }) });
           } catch (err: any) {
             console.error(`[Reflection retry] LLM call failed: ${err.message}`);
             break;
@@ -1969,7 +1971,7 @@ Scoring guide:
     const maxNudgeRounds = 3;
     for (let nudgeRound = 0; nudgeRound < maxNudgeRounds; nudgeRound++) {
       try {
-        const nudgeData = await llmCall(allMessages, { tools: await getTools() });
+        const nudgeData = await llmCall(allMessages, { tools: await getTools({ sessionId }) });
         const nudgeChoice = nudgeData.choices?.[0];
         if (!nudgeChoice?.message?.tool_calls?.length) {
           // LLM responded with text instead of tools

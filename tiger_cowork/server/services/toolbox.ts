@@ -204,16 +204,16 @@ const spawnSubagentTool = {
   type: "function" as const,
   function: {
     name: "spawn_subagent",
-    description: "Spawn a sub-agent to handle a specific sub-task independently. The sub-agent gets its own tool-calling loop and returns results when done. Use this for: parallel research, breaking complex tasks into parts, or delegating specialized work. Each sub-agent runs autonomously with full tool access.",
+    description: "Spawn a predefined agent from the YAML architecture to handle a sub-task. You MUST select an agent by agentId from the available agents list. Each agent has a specific role, persona, and responsibility — match the task to the best-fit agent. The agent runs autonomously with its own tool-calling loop and returns results when done.",
     parameters: {
       type: "object",
       properties: {
-        task: { type: "string", description: "Clear description of the sub-task for the sub-agent to complete" },
-        label: { type: "string", description: "Short label for this sub-agent (e.g. 'research-api', 'generate-chart')" },
-        context: { type: "string", description: "Optional additional context or data the sub-agent needs" },
-        agentId: { type: "string", description: "Optional agent ID from manual YAML config to use specific agent definition" },
+        task: { type: "string", description: "Clear description of the sub-task for the agent to complete" },
+        agentId: { type: "string", description: "REQUIRED — agent ID from the YAML config. Must match one of the available agents." },
+        label: { type: "string", description: "Short label for this agent task (e.g. 'research-api', 'generate-chart')" },
+        context: { type: "string", description: "Additional context or data the agent needs" },
       },
-      required: ["task"],
+      required: ["task", "agentId"],
     },
   },
 };
@@ -518,8 +518,67 @@ export function getProtocolToolsForAgent(agentDef?: AgentConfig | null, connecti
   return tools;
 }
 
+// --- Auto Choose Swarm: select_swarm tool ---
+const selectSwarmTool = {
+  type: "function" as const,
+  function: {
+    name: "select_swarm",
+    description: "Select the best agent swarm configuration for the current task. You MUST call this FIRST before doing any work. Review the available swarms and pick the one whose description and agents best match the user's request. After selection, agent tools will be injected for you to use.",
+    parameters: {
+      type: "object",
+      properties: {
+        filename: { type: "string", description: "The YAML filename to select (e.g. 'research_team.yaml')" },
+        reason: { type: "string", description: "Brief explanation of why this swarm is the best fit" },
+      },
+      required: ["filename"],
+    },
+  },
+};
+
+// Get summary of all available swarm configs for auto_swarm mode
+export function getAutoSwarmConfigSummary(): string | null {
+  const agentsDir = path.resolve("data/agents");
+  if (!fs.existsSync(agentsDir)) return null;
+  const files = fs.readdirSync(agentsDir).filter(f => f.endsWith(".yaml") || f.endsWith(".yml"));
+  if (files.length === 0) return null;
+
+  let summary = `\n\nAVAILABLE SWARM CONFIGURATIONS:\n`;
+  summary += `You MUST call select_swarm first to pick the best config for the user's task.\n\n`;
+  for (const f of files) {
+    try {
+      const content = fs.readFileSync(path.join(agentsDir, f), "utf8");
+      const parsed = yaml.load(content) as AgentSystemConfig;
+      if (!parsed?.agents) continue;
+      const name = parsed.system?.name || f.replace(/\.ya?ml$/, "");
+      const desc = parsed.system?.description || "";
+      const mode = parsed.system?.orchestration_mode || "hierarchical";
+      const agents = (parsed.agents || [])
+        .filter((a: AgentConfig) => a.role !== "human")
+        .map((a: AgentConfig) => `${a.name} (${a.role})`)
+        .join(", ");
+      summary += `- "${f}": ${name} [${mode}]${desc ? ` — ${desc}` : ""}\n  Agents: ${agents}\n`;
+    } catch {}
+  }
+  return summary;
+}
+
+// Track which swarm was selected per session for auto_swarm mode
+const autoSwarmSelections = new Map<string, string>(); // sessionId/taskId → filename
+
+export function setAutoSwarmSelection(sessionId: string, filename: string) {
+  autoSwarmSelections.set(sessionId, filename);
+}
+
+export function getAutoSwarmSelection(sessionId: string): string | undefined {
+  return autoSwarmSelections.get(sessionId);
+}
+
+export function clearAutoSwarmSelection(sessionId: string) {
+  autoSwarmSelections.delete(sessionId);
+}
+
 // Dynamic tools getter: built-in + MCP tools + conditional OpenRouter search + sub-agent
-export async function getTools(opts?: { excludeSubagent?: boolean }) {
+export async function getTools(opts?: { excludeSubagent?: boolean; sessionId?: string }) {
   const settings = await getSettings();
   const tools: any[] = [...builtinTools];
   if (settings.openRouterSearchEnabled && settings.openRouterSearchApiKey) {
@@ -529,8 +588,52 @@ export async function getTools(opts?: { excludeSubagent?: boolean }) {
     if (settings.subAgentMode === "realtime") {
       // Realtime mode: use send_task/wait_result instead of spawn_subagent
       tools.push(sendTaskTool, waitResultTool, checkAgentsTool);
+    } else if (settings.subAgentMode === "auto_swarm") {
+      // Check if a swarm has already been selected for this session
+      const selectedFile = opts?.sessionId ? getAutoSwarmSelection(opts.sessionId) : undefined;
+      if (selectedFile) {
+        // Swarm selected — agents are running in realtime mode.
+        // Provide send_task/wait_result/check_agents for coordination (same as realtime mode).
+        tools.push(sendTaskTool, waitResultTool, checkAgentsTool);
+        tools.push(selectSwarmTool); // keep for switching swarms
+      } else {
+        // No swarm selected yet — only offer select_swarm
+        tools.push(selectSwarmTool);
+      }
     } else {
-      tools.push(spawnSubagentTool);
+      // Dynamically build spawn tools from YAML config — one tool per agent
+      if (settings.subAgentConfigFile) {
+        const config = loadAgentConfig(settings.subAgentConfigFile);
+        const agents = (config?.agents || []).filter((a: AgentConfig) => a.role !== "human" && a.role !== "orchestrator");
+        if (agents.length > 0) {
+          // Create a dedicated spawn tool for each agent — LLM cannot invent agents
+          for (const agent of agents) {
+            const desc = [
+              agent.persona || "",
+              agent.responsibilities?.length ? `Responsibilities: ${agent.responsibilities.join("; ")}` : "",
+            ].filter(Boolean).join(". ");
+            tools.push({
+              type: "function" as const,
+              function: {
+                name: `spawn_${agent.id}`,
+                description: `Spawn agent "${agent.name}" (${agent.role}) to handle a task. ${desc}`,
+                parameters: {
+                  type: "object",
+                  properties: {
+                    task: { type: "string", description: "Clear description of the sub-task for this agent to complete" },
+                    context: { type: "string", description: "Additional context or data the agent needs" },
+                  },
+                  required: ["task"],
+                },
+              },
+            });
+          }
+        } else {
+          tools.push(spawnSubagentTool);
+        }
+      } else {
+        tools.push(spawnSubagentTool);
+      }
     }
   }
   if (settings.subAgentEnabled) {
@@ -552,11 +655,39 @@ export async function getTools(opts?: { excludeSubagent?: boolean }) {
   return [...tools, ...getMcpTools()];
 }
 
+// Get tools after auto_swarm selection — provides realtime coordination tools
+export async function getToolsAfterSwarmSelection(filename: string): Promise<any[]> {
+  const config = loadAgentConfig(filename);
+  if (!config) return await getTools();
+  // After swarm selection, agents are live in realtime mode.
+  // Give the orchestrator LLM the same tools as realtime mode: send_task/wait_result.
+  return await getToolsForRealtimeOrchestrator();
+}
+
 // Get manual agent config summary for system prompt injection
-export async function getManualAgentConfigSummary(): Promise<string | null> {
+export async function getManualAgentConfigSummary(sessionId?: string): Promise<string | null> {
   const settings = await getSettings();
   // Realtime mode has its own summary
   if (settings.subAgentMode === "realtime") return await getRealtimeAgentConfigSummary();
+  // Auto swarm mode: show available configs for selection (or realtime summary if already selected)
+  if (settings.subAgentMode === "auto_swarm") {
+    const selectedFile = sessionId ? getAutoSwarmSelection(sessionId) : undefined;
+    if (selectedFile) {
+      // Swarm already selected and running in realtime — show realtime-style summary
+      const config = loadAgentConfig(selectedFile);
+      if (config) {
+        const mode = config.system?.orchestration_mode || "hierarchical";
+        let summary = `\n\nACTIVE SWARM (${config.system?.name || selectedFile}, mode: ${mode}, REALTIME):\n`;
+        summary += `Agents are LIVE. Use send_task/wait_result to delegate work. Do NOT do work yourself.\n\n`;
+        for (const a of (config.agents || []).filter((ag: AgentConfig) => ag.role !== "human")) {
+          summary += `- ${a.id} ("${a.name}", ${a.role}): ${a.persona || ""}\n`;
+        }
+        summary += `\nCall select_swarm again to switch to a different architecture.\n`;
+        return summary;
+      }
+    }
+    return getAutoSwarmConfigSummary();
+  }
   if (settings.subAgentMode !== "manual" || !settings.subAgentConfigFile) return null;
   const config = loadAgentConfig(settings.subAgentConfigFile);
   if (!config) return null;
@@ -614,6 +745,7 @@ export async function getToolsForSubagent(
     tools.push(openRouterSearchTool);
   }
   const isManual = settings.subAgentMode === "manual";
+  const isAutoSwarm = settings.subAgentMode === "auto_swarm";
   if (settings.subAgentEnabled) {
     if (isManual) {
       // Manual mode: no depth limit — YAML structure is the boundary.
@@ -624,6 +756,9 @@ export async function getToolsForSubagent(
       const hasMesh = agentDef?.mesh?.enabled === true || systemConfig?.system?.orchestration_mode === "mesh";
       const hasP2P = agentDef?.role === "peer" || systemConfig?.system?.orchestration_mode === "p2p";
       if (hasDownstream || hasMesh || hasP2P) tools.push(spawnSubagentTool);
+    } else if (isAutoSwarm) {
+      // Auto swarm mode: agents run in realtime mode with YAML architecture.
+      // No spawn tools needed — coordination uses send_task/wait_result via the bus.
     } else {
       // Auto mode: depth limit applies
       if (currentDepth < maxDepth) tools.push(spawnSubagentTool);
@@ -1321,6 +1456,7 @@ interface P2PGovernanceConfig {
 interface AgentSystemConfig {
   system: {
     name: string;
+    description?: string;  // one-line summary of what this swarm does
     orchestration_mode: string;  // hierarchical, flat, mesh, hybrid, pipeline, p2p, p2p_orchestrator
     p2p_governance?: P2PGovernanceConfig;
   };
@@ -1931,7 +2067,7 @@ export async function spawnSubagent(
     }
   }
 
-  // Check concurrent limit
+  // Check concurrent limit (global across ALL depths to prevent exponential flooding)
   const maxConcurrent = settings.subAgentMaxConcurrent || 3;
   const runningCount = Array.from(activeSubagents.values()).filter(s => s.status === "running").length;
   if (runningCount >= maxConcurrent) {
@@ -3525,6 +3661,61 @@ export async function callTool(name: string, args: any, signal?: AbortSignal, ta
     case "clawhub_install": return clawhubInstallTool(args);
     case "spawn_subagent": return spawnSubagent(args, _currentParentSessionId, _currentSubagentDepth);
 
+    case "select_swarm": {
+      const { filename, reason } = args;
+      if (!filename) return { ok: false, error: "filename is required" };
+      const config = loadAgentConfig(filename);
+      if (!config) return { ok: false, error: `Config file "${filename}" not found or invalid` };
+      const allAgents = (config.agents || []).filter((a: AgentConfig) => a.role !== "human");
+      if (allAgents.length === 0) return { ok: false, error: "Selected config has no usable agents" };
+      // Store selection for this session
+      const sessionId = _currentParentSessionId || taskId || "default";
+      setAutoSwarmSelection(sessionId, filename);
+
+      // Shutdown any existing realtime session before booting the new one (swarm switching)
+      const existingSession = getRealtimeSession(sessionId);
+      if (existingSession) {
+        shutdownRealtimeSession(sessionId);
+      }
+
+      // Boot realtime session with the selected YAML config
+      // This starts all agents as persistent loops, using the architecture defined in the YAML
+      const rtSession = await startRealtimeSession(sessionId, filename, signal);
+      if (!rtSession) {
+        return { ok: false, error: `Failed to start realtime session for "${filename}"` };
+      }
+
+      const agentList = allAgents.map(a => ({
+        id: a.id,
+        name: a.name,
+        role: a.role,
+        persona: a.persona || "",
+        responsibilities: a.responsibilities || [],
+      }));
+      const mode = config.system?.orchestration_mode || "hierarchical";
+      const orchestrator = config.agents?.find((a: AgentConfig) => a.role === "orchestrator");
+
+      // Build delegation instructions based on orchestration mode
+      let delegationInstructions: string;
+      if (orchestrator) {
+        delegationInstructions = `Orchestrator "${orchestrator.id}" manages the team. Send tasks to the orchestrator and it will delegate to the right agents. Use send_task({to: "${orchestrator.id}", task: "..."}) then wait_result({from: "${orchestrator.id}"}).`;
+      } else {
+        const workerIds = allAgents.filter(a => a.role !== "orchestrator").map(a => a.id);
+        delegationInstructions = `Send tasks directly to agents using send_task({to: "<agentId>", task: "..."}) then wait_result({from: "<agentId>"}). Available agents: ${workerIds.join(", ")}.`;
+      }
+
+      return {
+        ok: true,
+        selected: filename,
+        systemName: config.system?.name || filename,
+        mode,
+        reason,
+        agents: agentList,
+        realtimeMode: true,
+        message: `Swarm "${config.system?.name || filename}" selected (${mode}). All agents are now LIVE in realtime mode. ${delegationInstructions} Do NOT do any work yourself — delegate everything via send_task/wait_result.`,
+      };
+    }
+
     case "remote_task": {
       const settings = await getSettings();
       const instances = settings.remoteInstances || [];
@@ -3793,6 +3984,11 @@ export async function callTool(name: string, args: any, signal?: AbortSignal, ta
     }
 
     default:
+      // Handle dynamic spawn_<agentId> tools from YAML config
+      if (name.startsWith("spawn_")) {
+        const agentId = name.slice(6); // remove "spawn_" prefix
+        return spawnSubagent({ ...args, agentId }, _currentParentSessionId, _currentSubagentDepth, signal);
+      }
       // Route MCP tools to MCP client
       if (isMcpTool(name)) return callMcpTool(name, args);
       return { ok: false, error: `Unknown tool: ${name}` };

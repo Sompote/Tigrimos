@@ -38,6 +38,11 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+function isImageFile(name: string): boolean {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  return ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext);
+}
+
 function getFileIcon(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase() || "";
   if (["pdf"].includes(ext)) return "PDF";
@@ -269,14 +274,80 @@ function OutputCanvas({ files }: { files: string[] }) {
   );
 }
 
-// Memoized streaming message — only re-renders when streaming content changes, not on status updates
+// Memoized single message — prevents re-parsing markdown when streaming/status changes
+const MessageItem = memo(({ msg, onOpenOutput }: { msg: Message; onOpenOutput: () => void }) => (
+  <div className={`message ${msg.role}`}>
+    <div className="message-avatar">{msg.role === "user" ? "U" : "C"}</div>
+    <div className="message-content">
+      {msg.role === "assistant" ? (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
+      ) : (
+        <>
+          {msg.attachments && msg.attachments.length > 0 && (
+            <div className="message-attachments">
+              {msg.attachments.map((f, j) => (
+                <div key={j} className="attachment-item">
+                  {isImageFile(f.name) ? (
+                    <img src={sandboxUrl(f.path)} alt={f.name} className="attachment-image-preview" />
+                  ) : (
+                    <div className="attachment-icon">{getFileIcon(f.name)}</div>
+                  )}
+                  <div className="attachment-info">
+                    <span className="attachment-name">{f.name}</span>
+                    <span className="attachment-size">{formatFileSize(f.size)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p>{msg.content.replace(/\[Attached file:.*?\]/g, "").trim()}</p>
+        </>
+      )}
+      {msg.files && msg.files.length > 0 && (
+        <div className="message-output-indicator" onClick={onOpenOutput}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+          {msg.files.length} output{msg.files.length > 1 ? "s" : ""} — view in panel
+        </div>
+      )}
+    </div>
+  </div>
+));
+
+// Memoized message list — isolates from streaming/status re-renders
+const MessageList = memo(({ messages, onOpenOutput }: { messages: Message[]; onOpenOutput: () => void }) => (
+  <>
+    {messages.map((msg, i) => (
+      <MessageItem key={i} msg={msg} onOpenOutput={onOpenOutput} />
+    ))}
+  </>
+));
+
+// Lightweight streaming renderer — uses dangerouslySetInnerHTML with simple HTML conversion
+// instead of full ReactMarkdown parsing. ReactMarkdown is too expensive at 7 renders/sec
+// and causes browser hangs during swarm activity.
+const STREAM_RENDER_LIMIT = 3000;
+function streamToHtml(text: string): string {
+  // Minimal markdown-like conversion: bold, inline code, blockquotes, links, line breaks
+  return text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/^&gt; (.*)$/gm, '<blockquote>$1</blockquote>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br/>');
+}
 const StreamingMessage = memo(({ content }: { content: string }) => {
   if (!content) return null;
+  let displayContent = content;
+  if (content.length > STREAM_RENDER_LIMIT) {
+    const cutIdx = content.lastIndexOf("\n", content.length - STREAM_RENDER_LIMIT);
+    const trimFrom = cutIdx > 0 ? cutIdx + 1 : content.length - STREAM_RENDER_LIMIT;
+    displayContent = `... ${Math.floor(trimFrom / 1000)}K chars above ...\n\n` + content.slice(trimFrom);
+  }
   return (
     <div className="message assistant">
       <div className="message-avatar">C</div>
       <div className="message-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+        <div dangerouslySetInnerHTML={{ __html: streamToHtml(displayContent) }} />
       </div>
     </div>
   );
@@ -297,6 +368,9 @@ export default function ChatPage() {
   const [outputPanelOpen, setOutputPanelOpen] = useState(true);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [activeTaskSessions, setActiveTaskSessions] = useState<Set<string>>(new Set());
+  const [showActivityLog, setShowActivityLog] = useState(false);
+  const [activityLogContent, setActivityLogContent] = useState("");
+  const activityLogRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -305,14 +379,23 @@ export default function ChatPage() {
   // ─── Throttled streaming: batch chunks to avoid re-rendering on every tiny chunk ───
   const streamBufferRef = useRef("");
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const STREAM_FLUSH_MS = 150; // flush at most ~7 times/sec
+  const STREAM_FLUSH_MS = 350; // flush at most ~3 times/sec (was 150ms — too fast for swarm events)
 
+  const STREAM_MAX_LEN = 8000; // cap streaming string to prevent O(n²) growth
   const flushStreamBuffer = useCallback(() => {
     streamFlushTimerRef.current = null;
     if (streamBufferRef.current) {
       const buf = streamBufferRef.current;
       streamBufferRef.current = "";
-      setStreaming((prev) => prev + buf);
+      setStreaming((prev) => {
+        const next = prev + buf;
+        // Trim from the front if too long — keep the most recent content
+        if (next.length > STREAM_MAX_LEN) {
+          const cutIdx = next.indexOf("\n", next.length - STREAM_MAX_LEN);
+          return cutIdx > 0 ? next.slice(cutIdx + 1) : next.slice(next.length - STREAM_MAX_LEN);
+        }
+        return next;
+      });
     }
   }, []);
 
@@ -422,7 +505,10 @@ export default function ChatPage() {
         // Track running tasks by ID for this session
         const sessionTasks = tasks.filter((t: any) => t.sessionId === activeSession);
         const sessionTaskIds = new Set(sessionTasks.map((t: any) => t.id as string));
-        setRunningTaskIds(sessionTaskIds);
+        setRunningTaskIds((prev) => {
+          if (prev.size === sessionTaskIds.size && [...prev].every(id => sessionTaskIds.has(id))) return prev;
+          return sessionTaskIds;
+        });
         const activeTask = sessionTasks[sessionTasks.length - 1]; // show status of most recent task
         if (activeTask) {
           wasLoadingRef.current = true;
@@ -491,29 +577,29 @@ export default function ChatPage() {
       }
     });
     const unsub2 = onResponse((data) => {
-      // Don't clear activeTaskSessions here — let the "done" status handle it
-      // to avoid premature green dot removal while the task is still cleaning up
-      if (data.sessionId === activeSession) {
-        // Refresh messages from server to get the complete history including the new response
-        wasLoadingRef.current = false;
+      if (data.sessionId !== activeSession) return;
+      if (data.done === false) {
+        // Progress flush — just refresh messages to show saved activity logs.
+        // Do NOT clear streaming/status — the task is still running.
         api.getSession(activeSession).then((session: any) => {
           setMessages(session.messages || []);
-          // Force output panel refresh so new files (images, PDFs) render immediately
         });
-        // Clear streaming AND pending buffer to prevent stale flush from restoring old content
-        streamBufferRef.current = "";
-        if (streamFlushTimerRef.current) { clearTimeout(streamFlushTimerRef.current); streamFlushTimerRef.current = null; }
-        setStreaming("");
-        // Remove completed task from running set (will be refreshed by polling)
-        setRunningTaskIds((prev) => {
-          if (prev.size === 0) return prev;
-          // We don't know the exact taskId here, so let polling clean up.
-          // But if only 1 task was running, clear it.
-          if (prev.size === 1) return new Set();
-          return prev;
-        });
-        setStatus("");
+        return;
       }
+      // Final response — refresh messages + clear streaming state
+      wasLoadingRef.current = false;
+      api.getSession(activeSession).then((session: any) => {
+        setMessages(session.messages || []);
+      });
+      streamBufferRef.current = "";
+      if (streamFlushTimerRef.current) { clearTimeout(streamFlushTimerRef.current); streamFlushTimerRef.current = null; }
+      setStreaming("");
+      setRunningTaskIds((prev) => {
+        if (prev.size === 0) return prev;
+        if (prev.size === 1) return new Set();
+        return prev;
+      });
+      setStatus("");
     });
     const unsub3 = onStatus((data: any) => {
       // Track active task sessions for sidebar indicators
@@ -607,25 +693,56 @@ export default function ChatPage() {
             return next;
           });
         }
-        setRunningTaskIds(new Set());
+        setRunningTaskIds((prev) => prev.size === 0 ? prev : new Set());
         setStatus("");
+      } else if (typeof data.status === "string" && data.status.startsWith("Waiting for ")) {
+        // "Waiting for agentName..." from late-result monitor — show it
+        setThrottledStatus(data.status);
       } else {
-        setStatus("");
+        // Unknown status — ignore silently instead of clearing status
+        // (clearing status on every unrecognized event caused render thrashing)
       }
     });
     return () => { unsub1(); unsub2(); unsub3(); };
   }, [activeSession, onChunk, onResponse, onStatus]);
 
-  // Throttled scroll — avoid expensive DOM layout on every chunk
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ─── Activity log polling: fetch log file when panel is open ───
   useEffect(() => {
-    if (!scrollTimerRef.current) {
-      scrollTimerRef.current = setTimeout(() => {
-        scrollTimerRef.current = null;
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 200);
+    if (!showActivityLog || !activeSession) { setActivityLogContent(""); return; }
+    let cancelled = false;
+    const fetchLog = () => {
+      api.getActivityLog(activeSession).then((res: any) => {
+        if (!cancelled && res.content) {
+          setActivityLogContent(res.content);
+          // Auto-scroll activity log to bottom
+          setTimeout(() => activityLogRef.current?.scrollTo(0, activityLogRef.current.scrollHeight), 50);
+        }
+      }).catch(() => {});
+    };
+    fetchLog();
+    const iv = setInterval(fetchLog, isLoading ? 2000 : 5000); // faster poll while task running
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [showActivityLog, activeSession, isLoading]);
+
+  // Throttled scroll — avoid expensive DOM layout on every chunk
+  // Use interval-based scroll instead of effect-on-streaming to prevent re-renders every 150ms
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevMessagesLenRef = useRef(0);
+  useEffect(() => {
+    // Scroll on new messages
+    if (messages.length !== prevMessagesLenRef.current) {
+      prevMessagesLenRef.current = messages.length;
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, streaming]);
+  }, [messages]);
+  // During streaming, scroll on a fixed interval instead of every state change
+  useEffect(() => {
+    if (!streaming) return;
+    const iv = setInterval(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 500);
+    return () => clearInterval(iv);
+  }, [!!streaming]); // only re-run when streaming starts/stops, not on content changes
 
   const createNewSession = async () => {
     const session = await api.createSession();
@@ -745,11 +862,6 @@ export default function ChatPage() {
     }
   };
 
-  const isImageFile = (name: string) => {
-    const ext = name.split(".").pop()?.toLowerCase() || "";
-    return ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext);
-  };
-
   return (
     <div className="chat-page">
       <div className={`chat-sidebar-backdrop ${mobileSidebar ? "visible" : ""}`} onClick={() => setMobileSidebar(false)} />
@@ -775,10 +887,22 @@ export default function ChatPage() {
       </div>
 
       <div className="chat-main" onDrop={handleDrop} onDragOver={handleDragOver}>
-        <button className="mobile-sessions-toggle" onClick={() => setMobileSidebar(true)}>
-          <Icon name="chat" />
-          <span>{activeSession ? sessions.find(s => s.id === activeSession)?.title || "Chat" : "Sessions"}</span>
-        </button>
+        <div className="chat-top-bar">
+          <button className="mobile-sessions-toggle" onClick={() => setMobileSidebar(true)}>
+            <Icon name="chat" />
+            <span>{activeSession ? sessions.find(s => s.id === activeSession)?.title || "Chat" : "Sessions"}</span>
+          </button>
+          <button
+            className={`activity-log-toggle ${showActivityLog ? "active" : ""}`}
+            onClick={() => setShowActivityLog(v => !v)}
+            title={showActivityLog ? "Hide activity log" : "Show activity log"}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            <span>Activity</span>
+          </button>
+        </div>
         {!activeSession && messages.length === 0 ? (
           <div className="chat-empty">
             <h1>TigrimOS</h1>
@@ -793,48 +917,29 @@ export default function ChatPage() {
             </div>
           </div>
         ) : (
-          <div className="chat-messages">
-            {messages.map((msg, i) => (
-              <div key={i} className={`message ${msg.role}`}>
-                <div className="message-avatar">{msg.role === "user" ? "U" : "C"}</div>
-                <div className="message-content">
-                  {msg.role === "assistant" ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
+          <>
+            {showActivityLog && (
+              <div className="activity-log-panel">
+                <div className="activity-log-header">
+                  <span>Activity Log</span>
+                  {isLoading && <span className="activity-log-live">LIVE</span>}
+                </div>
+                <div className="activity-log-body" ref={activityLogRef}>
+                  {activityLogContent ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{activityLogContent}</ReactMarkdown>
                   ) : (
-                    <>
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="message-attachments">
-                          {msg.attachments.map((f, j) => (
-                            <div key={j} className="attachment-item">
-                              {isImageFile(f.name) ? (
-                                <img src={sandboxUrl(f.path)} alt={f.name} className="attachment-image-preview" />
-                              ) : (
-                                <div className="attachment-icon">{getFileIcon(f.name)}</div>
-                              )}
-                              <div className="attachment-info">
-                                <span className="attachment-name">{f.name}</span>
-                                <span className="attachment-size">{formatFileSize(f.size)}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <p>{msg.content.replace(/\[Attached file:.*?\]/g, "").trim()}</p>
-                    </>
-                  )}
-                  {msg.files && msg.files.length > 0 && (
-                    <div className="message-output-indicator" onClick={() => setOutputPanelOpen(true)}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
-                      {msg.files.length} output{msg.files.length > 1 ? "s" : ""} — view in panel
-                    </div>
+                    <div className="activity-log-empty">No activity yet. Run a task with agents to see logs here.</div>
                   )}
                 </div>
               </div>
-            ))}
-            <StreamingMessage content={streaming} />
-            {status && <div className="chat-status">{status}</div>}
-            <div ref={messagesEndRef} />
-          </div>
+            )}
+            <div className="chat-messages">
+              <MessageList messages={messages} onOpenOutput={() => setOutputPanelOpen(true)} />
+              <StreamingMessage content={streaming} />
+              {status && <div className="chat-status">{status}</div>}
+              <div ref={messagesEndRef} />
+            </div>
+          </>
         )}
 
         <div className="chat-input-container">

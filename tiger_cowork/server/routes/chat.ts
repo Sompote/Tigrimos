@@ -2,8 +2,23 @@ import { FastifyInstance } from "fastify";
 import { v4 as uuid } from "uuid";
 import { getChatHistory, saveChatHistory, ChatSession, deleteAgentHistory } from "../services/data";
 import { callTigerBot } from "../services/tigerbot";
+import fs from "fs";
+import path from "path";
+
+const ACTIVITY_LOG_DIR = path.resolve("data", "activity_logs");
 
 export async function chatRoutes(fastify: FastifyInstance) {
+  // Get activity log for a session
+  fastify.get("/sessions/:id/activity", async (request, reply) => {
+    const sessionId = (request.params as any).id;
+    const logPath = path.join(ACTIVITY_LOG_DIR, `${sessionId}.log`);
+    try {
+      const content = fs.readFileSync(logPath, "utf-8");
+      return { ok: true, content };
+    } catch {
+      return { ok: true, content: "" };
+    }
+  });
   // Get all chat sessions
   fastify.get("/sessions", async (request, reply) => {
     const sessions = await getChatHistory();

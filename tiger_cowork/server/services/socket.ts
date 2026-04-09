@@ -3,7 +3,7 @@ import { v4 as uuid } from "uuid";
 import { callTigerBotWithTools, callTigerBot, trimConversationContext, compressOlderMessages, estimateMessagesChars, stripThinkingFromContent } from "./tigerbot";
 import { getChatHistory, saveChatHistory, ChatSession, getSettings, getProjects, getSkills } from "./data";
 import { runPython } from "./python";
-import { setSubagentStatusCallback, setCallContext, clearCallContext, loadAgentConfig, getManualAgentConfigSummary, startRealtimeSession, shutdownRealtimeSession, getRealtimeSession, getToolsForRealtimeOrchestrator, getHumanConnectedAgents, humanSendToAgent, humanBroadcastToAgents, humanWaitForAgent, collectPendingResults, getWorkingAgents } from "./toolbox";
+import { setSubagentStatusCallback, setCallContext, clearCallContext, loadAgentConfig, getManualAgentConfigSummary, startRealtimeSession, shutdownRealtimeSession, getRealtimeSession, getToolsForRealtimeOrchestrator, getHumanConnectedAgents, humanSendToAgent, humanBroadcastToAgents, humanWaitForAgent, collectPendingResults, getWorkingAgents, clearAutoSwarmSelection, getAutoSwarmSelection } from "./toolbox";
 import { busSubscribe, busPublish, busWaitForMessage } from "./protocols";
 import path from "path";
 import { execSync } from "child_process";
@@ -51,6 +51,7 @@ export interface ActiveTask {
 }
 
 const activeTasks = new Map<string, ActiveTask>();
+const sessionToTaskId = new Map<string, string>(); // sessionId → taskId for O(1) lookup
 const taskAbortControllers = new Map<string, AbortController>();
 
 export function getActiveTasks(): (Omit<ActiveTask, 'activeAgents' | 'doneAgents'> & { activeAgents: string[]; doneAgents: string[] })[] {
@@ -76,6 +77,8 @@ export function killActiveTask(taskId: string): boolean {
   if (controller) {
     controller.abort();
     // Immediately remove from active tasks so UI updates
+    const task = activeTasks.get(taskId);
+    if (task) sessionToTaskId.delete(task.sessionId);
     activeTasks.delete(taskId);
     taskAbortControllers.delete(taskId);
     return true;
@@ -83,7 +86,7 @@ export function killActiveTask(taskId: string): boolean {
   return false;
 }
 
-async function buildSystemPrompt(filterSkillIds?: string[]): Promise<string> {
+async function buildSystemPrompt(filterSkillIds?: string[], sessionId?: string): Promise<string> {
   // Gather installed clawhub skills
   const clawhubDir = path.resolve("Tiger_bot/skills");
   let clawhubSkills: string[] = [];
@@ -178,6 +181,7 @@ async function buildSystemPrompt(filterSkillIds?: string[]): Promise<string> {
   const settings = await getSettings();
   const isManualSubAgent = settings.subAgentEnabled && settings.subAgentMode === "manual";
   const isRealtimeAgent = settings.subAgentEnabled && settings.subAgentMode === "realtime";
+  const isAutoSwarm = settings.subAgentEnabled && settings.subAgentMode === "auto_swarm";
 
   // Mode-specific delegation rules
   let delegationRules = "";
@@ -187,11 +191,23 @@ REALTIME AGENT MODE: All agents are already alive. Delegate ALL work to the agen
 - If an orchestrator exists, send tasks ONLY to the orchestrator — it manages all sub-delegation.
 - Workflow: send_task → wait_result → synthesize response. Only use run_python/write_file for formatting final output.
 - Always delegate, even for follow-ups or corrections. Include chat context so agents know what to fix.`;
+  } else if (isAutoSwarm) {
+    delegationRules = `
+AUTO CHOOSE SWARM MODE: You are the orchestrator. Your workflow is:
+1. FIRST: Call select_swarm to pick the best agent swarm config from the available list below. Analyze the user's task and match it to the swarm whose description and agents fit best.
+2. AFTER SELECTION: The selected agents will boot in REALTIME mode. Use send_task({to: "<agentId>", task: "..."}) to delegate work, then wait_result({from: "<agentId>"}) to collect results.
+3. Do NOT do any work yourself — delegate everything to agents via send_task/wait_result.
+4. After all agents return, synthesize their results into a clear final response.
+5. If the user's task changes significantly, you may call select_swarm again to switch to a different swarm.
+6. IMPORTANT: Only use agents defined in the selected YAML architecture. Do NOT invent or create new agents.`;
   } else if (isManualSubAgent) {
     delegationRules = `
-MANUAL SUB-AGENT MODE: Delegate ALL tasks via spawn_subagent with agentId matching the YAML config.
-- Follow the workflow sequence strictly. Spawn independent downstream agents in parallel.
-- Always delegate, even for simple tasks or follow-ups. Include chat context so agents know what to fix.`;
+SPAWN AGENT MODE: You are the orchestrator. You MUST NOT do any work yourself — your ONLY job is to delegate tasks to agents using spawn_subagent with the correct agentId.
+- ALWAYS use spawn_subagent with agentId from the YAML agent list below. NEVER skip agentId.
+- Match each sub-task to the agent whose role, persona, and responsibility best fit.
+- Follow the workflow sequence. Spawn independent agents in parallel when possible.
+- After all agents return, synthesize their results into a clear final response.
+- Even for simple tasks or follow-ups, delegate to the appropriate agent — do NOT answer directly.`;
   } else if (settings.subAgentEnabled) {
     delegationRules = `
 SUB-AGENTS: Use spawn_subagent for complex multi-part tasks. Each sub-agent runs independently with full tool access.`;
@@ -230,7 +246,7 @@ Output files:
 - Save charts as .png (plt.savefig, never plt.show). Save reports as .html or .pdf. Use python-docx for .docx files (never write_file for binary formats).
 - Generate actual output files — don't just print data. Combine data processing and chart generation in one run_python call when possible.
 - For interactive visualizations, use run_react. Globals (React, hooks, Recharts components) are pre-loaded — do not use import/export statements.
-- MCP tools (prefixed "mcp_") are available when connected via Settings.${skillsList}${await getManualAgentConfigSummary() || ""}`;
+- MCP tools (prefixed "mcp_") are available when connected via Settings.${skillsList}${await getManualAgentConfigSummary(sessionId) || ""}`;
 }
 
 // Store io reference for broadcasting status to all connected clients
@@ -247,12 +263,161 @@ export function setupSocket(io: Server): void {
   // Track whether swarm tag was already shown per session
   const swarmTagShown = new Set<string>();
 
+  // ─── Activity log: append to a simple log file per session ───
+  const ACTIVITY_LOG_DIR = path.resolve("data", "activity_logs");
+  try { if (!fs.existsSync(ACTIVITY_LOG_DIR)) fs.mkdirSync(ACTIVITY_LOG_DIR, { recursive: true }); } catch {}
+
+  function appendSessionProgress(sessionId: string, text: string) {
+    try {
+      fs.appendFileSync(path.join(ACTIVITY_LOG_DIR, `${sessionId}.log`), text);
+    } catch {}
+  }
+
+  function clearSessionProgress(sessionId: string) {
+    // no-op — keep log files for history
+  }
+
+  // ─── Throttle sub-agent tool events to prevent flooding React ───
+  // In swarm mode, multiple agents fire tool events simultaneously. Without throttling,
+  // this can send 50-100+ socket events/sec, overwhelming the browser's React render loop.
+  const SUBAGENT_TOOL_THROTTLE_MS = 500; // max ~2 tool events per agent per second (was 300ms)
+  const lastToolEmitTime = new Map<string, number>(); // agentId → last emit timestamp
+  const pendingToolEvents = new Map<string, Record<string, any>>(); // agentId → latest pending event
+
+  function shouldThrottleToolEvent(data: Record<string, any>): boolean {
+    // Throttle high-frequency agent events; always emit spawn/done/error immediately
+    const status = data.status as string;
+    // Allow these through immediately — they're infrequent lifecycle events
+    if (status === "subagent_spawn" || status === "subagent_done" || status === "subagent_error" ||
+        status === "realtime_agent_ready" || status === "realtime_agent_done" ||
+        status === "done" || status === "human_node_message") return false;
+    // Throttle all frequent events: tool calls, working status, tool_done
+    if (!status?.includes("tool") && !status?.includes("working")) return false;
+
+    const agentKey = (data.subagentId || data.label || data.agentId || "main") as string;
+    const now = Date.now();
+    const lastEmit = lastToolEmitTime.get(agentKey) || 0;
+
+    if (now - lastEmit < SUBAGENT_TOOL_THROTTLE_MS) {
+      // Store latest event — will be emitted when throttle window expires
+      pendingToolEvents.set(agentKey, data);
+      // Schedule flush if not already scheduled
+      if (!lastToolEmitTime.has(`_timer_${agentKey}`)) {
+        const remaining = SUBAGENT_TOOL_THROTTLE_MS - (now - lastEmit);
+        setTimeout(() => {
+          lastToolEmitTime.delete(`_timer_${agentKey}`);
+          const pending = pendingToolEvents.get(agentKey);
+          if (pending) {
+            pendingToolEvents.delete(agentKey);
+            lastToolEmitTime.set(agentKey, Date.now());
+            broadcastStatus(pending);
+            emitSubagentChunk(pending);
+          }
+        }, remaining);
+        lastToolEmitTime.set(`_timer_${agentKey}`, 1); // sentinel
+      }
+      return true;
+    }
+    lastToolEmitTime.set(agentKey, now);
+    return false;
+  }
+
+  // Extracted chunk emitter so throttle flush can reuse it
+  function emitSubagentChunk(data: Record<string, any>) {
+    if (!data.sessionId || !ioRef) return;
+    let progressText = "";
+
+    if (data.status === "subagent_spawn" && !swarmTagShown.has(data.sessionId as string)) {
+      swarmTagShown.add(data.sessionId as string);
+      progressText += `\n<div class="swarm-tag">🐝 SWARM MODE ACTIVE</div>\n\n`;
+    }
+
+    if (data.status === "subagent_spawn") {
+      progressText += `> **🔄 Sub-agent "${data.label}"** spawned (depth ${data.depth}) — _${((data.task as string) || "").slice(0, 500)}_\n`;
+    } else if (data.status === "subagent_tool") {
+      if (data.tool?.startsWith("proto_")) {
+        const protoName = (data.tool as string).replace("proto_", "").split("_")[0].toUpperCase();
+        progressText = `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> **${data.label}** → \`${data.tool}\`\n`;
+      } else {
+        progressText = `> **⚙️ ${data.label}** → \`${data.tool}\`\n`;
+      }
+    } else if (data.status === "subagent_done") {
+      progressText = `> **✅ Sub-agent "${data.label}"** completed\n`;
+    } else if (data.status === "subagent_error") {
+      progressText = `> **❌ Sub-agent "${data.label}"** failed: ${data.error}\n`;
+    } else if (data.status === "realtime_agent_ready") {
+      if (!swarmTagShown.has(data.sessionId as string)) {
+        swarmTagShown.add(data.sessionId as string);
+        progressText += `\n<div class="swarm-tag">⚡ REALTIME AGENT MODE</div>\n\n`;
+      }
+      progressText += `> **🟢 ${data.label}** (${data.role}) is ready\n`;
+    } else if (data.status === "realtime_agent_working") {
+      progressText = `> **🔄 ${data.label}** working — _${((data.task as string) || "").slice(0, 500)}_\n`;
+    } else if (data.status === "realtime_agent_tool") {
+      if (data.tool === "error_recovery") {
+        progressText = `> **🔄 ${data.label}** encountered an error — recovering and retrying...\n`;
+      } else if (data.tool?.startsWith("proto_")) {
+        const protoName = (data.tool as string).replace("proto_", "").split("_")[0].toUpperCase();
+        progressText = `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> **${data.label}** → \`${data.tool}\`\n`;
+      } else if (data.tool === "send_task") {
+        progressText = `> **📤 ${data.label}** delegating task\n`;
+      } else if (data.tool === "wait_result") {
+        progressText = `> **⏳ ${data.label}** waiting for result\n`;
+      } else {
+        progressText = `> **⚙️ ${data.label}** → \`${data.tool}\`\n`;
+      }
+    } else if (data.status === "realtime_agent_tool_done") {
+      // silent
+    } else if (data.status === "realtime_agent_done") {
+      progressText = `> **✅ ${data.label}** task completed\n`;
+    } else if (data.status === "running" && data.content) {
+      progressText = `> **📡 ${data.label}** — _${(data.content as string).replace(/^\[.*?\]\s*/, "").slice(0, 500)}_\n`;
+    } else if (data.status === "done" && data.label) {
+      progressText = `> **✅ ${data.label}** remote task completed\n`;
+    } else if (data.status === "human_node_message") {
+      progressText = `\n<div class="agent-response-tag" data-agent="${data.agentId}">📨 <strong>${data.label}</strong></div>\n\n${data.content}\n`;
+      // Save agent-to-human messages with output files
+      const humanMsgFiles: string[] = (data.outputFiles as string[]) || [];
+      getSettings().then(async (msgSettings) => {
+        const msgSandboxDir = msgSettings.sandboxDir || path.resolve("sandbox");
+        const scannedMsgFiles = scanOutputFiles(msgSandboxDir, Date.now() - 120000);
+        for (const sf of scannedMsgFiles) {
+          if (!humanMsgFiles.includes(sf)) humanMsgFiles.push(sf);
+        }
+        if (humanMsgFiles.length > 0) {
+          const sessions = await getChatHistory();
+          const session = sessions.find((s) => s.id === data.sessionId);
+          if (session) {
+            const agentMsg = `<div class="agent-response-tag" data-agent="${data.agentId}">📨 <strong>${data.label}</strong></div>\n\n${data.content}`;
+            session.messages.push({
+              role: "assistant",
+              content: agentMsg,
+              timestamp: new Date().toISOString(),
+              files: humanMsgFiles,
+            });
+            await saveChatHistory(sessions);
+            ioRef?.emit("chat:response", { sessionId: data.sessionId, content: agentMsg, done: false, files: humanMsgFiles });
+          }
+        }
+      }).catch(() => {});
+    }
+    if (progressText) {
+      // Only record to session progress for chat history persistence.
+      // Do NOT emit chat:chunk here — it floods the React client with constant re-renders.
+      // The chat:status events already provide real-time UI feedback.
+      appendSessionProgress(data.sessionId as string, progressText);
+    }
+  }
+
   // Wire up sub-agent status broadcasting — emit both status AND chat chunks for live progress
+  // Tool events are throttled to prevent flooding the React UI
   setSubagentStatusCallback((data) => {
+    if (shouldThrottleToolEvent(data)) return; // throttled — will emit later
     broadcastStatus(data);
     // Update active task agent tracking from subagent/realtime agent events
     if (data.sessionId) {
-      const task = Array.from(activeTasks.values()).find(t => t.sessionId === data.sessionId);
+      const taskId = sessionToTaskId.get(data.sessionId as string);
+      const task = taskId ? activeTasks.get(taskId) : undefined;
       if (task) {
         const agentLabel = data.label || data.agentId || "Agent";
         if (data.status === "subagent_spawn" || data.status === "realtime_agent_working") {
@@ -301,100 +466,8 @@ export function setupSocket(io: Server): void {
         task.lastUpdate = new Date().toISOString();
       }
     }
-    // Stream sub-agent progress as chat chunks so user sees real-time updates in the chat
-    if (data.sessionId && ioRef) {
-      let progressText = "";
-
-      // Show swarm mode tag on first sub-agent spawn in this session
-      if (data.status === "subagent_spawn" && !swarmTagShown.has(data.sessionId)) {
-        swarmTagShown.add(data.sessionId);
-        progressText += `\n<div class="swarm-tag">🐝 SWARM MODE ACTIVE</div>\n\n`;
-      }
-
-      if (data.status === "subagent_spawn") {
-        progressText += `> **🔄 Sub-agent "${data.label}"** spawned (depth ${data.depth}) — _${(data.task || "").slice(0, 500)}_\n`;
-      } else if (data.status === "subagent_tool") {
-        // Tag protocol tool usage
-        if (data.tool?.startsWith("proto_")) {
-          const protoName = data.tool.replace("proto_", "").split("_")[0].toUpperCase();
-          progressText = `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> **${data.label}** → \`${data.tool}\`\n`;
-        } else {
-          progressText = `> **⚙️ ${data.label}** → \`${data.tool}\`\n`;
-        }
-      } else if (data.status === "subagent_done") {
-        progressText = `> **✅ Sub-agent "${data.label}"** completed\n`;
-      } else if (data.status === "subagent_error") {
-        progressText = `> **❌ Sub-agent "${data.label}"** failed: ${data.error}\n`;
-
-      // ─── Realtime Agent progress ───
-      } else if (data.status === "realtime_agent_ready") {
-        if (!swarmTagShown.has(data.sessionId)) {
-          swarmTagShown.add(data.sessionId);
-          progressText += `\n<div class="swarm-tag">⚡ REALTIME AGENT MODE</div>\n\n`;
-        }
-        progressText += `> **🟢 ${data.label}** (${data.role}) is ready\n`;
-      } else if (data.status === "realtime_agent_working") {
-        progressText = `> **🔄 ${data.label}** working — _${(data.task || "").slice(0, 500)}_\n`;
-      } else if (data.status === "realtime_agent_tool") {
-        if (data.tool === "error_recovery") {
-          progressText = `> **🔄 ${data.label}** encountered an error — recovering and retrying...\n`;
-        } else if (data.tool?.startsWith("proto_")) {
-          const protoName = data.tool.replace("proto_", "").split("_")[0].toUpperCase();
-          progressText = `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> **${data.label}** → \`${data.tool}\`\n`;
-        } else if (data.tool === "send_task") {
-          progressText = `> **📤 ${data.label}** delegating task\n`;
-        } else if (data.tool === "wait_result") {
-          progressText = `> **⏳ ${data.label}** waiting for result\n`;
-        } else {
-          progressText = `> **⚙️ ${data.label}** → \`${data.tool}\`\n`;
-        }
-      } else if (data.status === "realtime_agent_tool_done") {
-        // silent — avoid flooding
-      } else if (data.status === "realtime_agent_done") {
-        progressText = `> **✅ ${data.label}** task completed\n`;
-
-      // ─── Remote agent progress (streamed from polling) ───
-      } else if (data.status === "running" && data.content) {
-        progressText = `> **📡 ${data.label}** — _${data.content.replace(/^\[.*?\]\s*/, "").slice(0, 500)}_\n`;
-      } else if (data.status === "done" && data.label) {
-        progressText = `> **✅ ${data.label}** remote task completed\n`;
-
-      // ─── Human Node messages (agent → human) ───
-      } else if (data.status === "human_node_message") {
-        progressText = `\n<div class="agent-response-tag" data-agent="${data.agentId}">📨 <strong>${data.label}</strong></div>\n\n${data.content}\n`;
-
-        // Save agent-to-human messages with output files so they appear in the output panel
-        const humanMsgFiles: string[] = data.outputFiles || [];
-        // Also scan sandbox for files generated during agent work
-        getSettings().then(async (msgSettings) => {
-          const msgSandboxDir = msgSettings.sandboxDir || path.resolve("sandbox");
-          const scannedMsgFiles = scanOutputFiles(msgSandboxDir, Date.now() - 120000); // files from last 2 min
-          for (const sf of scannedMsgFiles) {
-            if (!humanMsgFiles.includes(sf)) humanMsgFiles.push(sf);
-          }
-          if (humanMsgFiles.length > 0) {
-            // Save message with files to chat history so output panel picks them up
-            const sessions = await getChatHistory();
-            const session = sessions.find((s) => s.id === data.sessionId);
-            if (session) {
-              const agentMsg = `<div class="agent-response-tag" data-agent="${data.agentId}">📨 <strong>${data.label}</strong></div>\n\n${data.content}`;
-              session.messages.push({
-                role: "assistant",
-                content: agentMsg,
-                timestamp: new Date().toISOString(),
-                files: humanMsgFiles,
-              });
-              await saveChatHistory(sessions);
-              // Emit response with files so client refreshes output panel
-              ioRef?.emit("chat:response", { sessionId: data.sessionId, content: agentMsg, done: false, files: humanMsgFiles });
-            }
-          }
-        }).catch(() => {});
-      }
-      if (progressText) {
-        ioRef.emit("chat:chunk", { sessionId: data.sessionId, content: progressText });
-      }
-    }
+    // Stream sub-agent progress as chat chunks (uses extracted emitSubagentChunk with throttling)
+    emitSubagentChunk(data);
   });
 
   io.on("connection", (socket: Socket) => {
@@ -433,6 +506,7 @@ export function setupSocket(io: Server): void {
         content: message,
         timestamp: new Date().toISOString(),
       });
+            await saveChatHistory(sessions);
       session.updatedAt = new Date().toISOString();
       await saveChatHistory(sessions);
 
@@ -702,6 +776,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
 
       broadcastStatus({ sessionId, status: "thinking" });
       swarmTagShown.delete(sessionId); // Reset swarm tag for new turn
+      // No-op: activity log is file-based, no in-memory state to reset
       const toolsUsed: string[] = [];
       const outputFiles: string[] = [];
 
@@ -721,6 +796,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         lastUpdate: new Date().toISOString(),
       };
       activeTasks.set(taskId, activeTask);
+      sessionToTaskId.set(activeTask.sessionId, taskId);
       const abortController = new AbortController();
       taskAbortControllers.set(taskId, abortController);
 
@@ -728,19 +804,25 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         // Set call context for sub-agent spawning (per-task, supports parallel execution)
         setCallContext(taskId, sessionId, 0);
 
-        // Boot realtime agents if in realtime mode
+        // Boot realtime agents if in realtime mode or auto_swarm with a selected config
         const rtSettings = await getSettings();
         let realtimeTools: any[] | undefined;
-        if (rtSettings.subAgentEnabled && rtSettings.subAgentMode === "realtime" && rtSettings.subAgentConfigFile) {
-          const rtSession = await startRealtimeSession(sessionId, rtSettings.subAgentConfigFile, abortController.signal);
+        const autoSwarmConfigFile = rtSettings.subAgentMode === "auto_swarm"
+          ? getAutoSwarmSelection(sessionId)
+          : undefined;
+        const realtimeConfigFile = rtSettings.subAgentMode === "realtime"
+          ? rtSettings.subAgentConfigFile
+          : autoSwarmConfigFile;
+
+        if (rtSettings.subAgentEnabled && realtimeConfigFile) {
+          const rtSession = await startRealtimeSession(sessionId, realtimeConfigFile, abortController.signal);
           if (rtSession) {
             realtimeTools = await getToolsForRealtimeOrchestrator();
             // Notify client that realtime agents are alive
             const agentNames = Array.from(rtSession.agents.values()).map(h => `${h.agentDef.name} (${h.agentDef.id})`);
-            socket.emit("chat:chunk", {
-              sessionId,
-              content: `> **Realtime Agents Active:** ${agentNames.join(", ")}\n\n`,
-            });
+            const rtActiveChunk = `> **Realtime Agents Active:** ${agentNames.join(", ")}\n\n`;
+            socket.emit("chat:chunk", { sessionId, content: rtActiveChunk });
+            appendSessionProgress(sessionId, rtActiveChunk);
           }
         }
 
@@ -748,8 +830,8 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         // When realtime mode is active and there's an orchestrator agent,
         // skip the Main LLM call and send the user's message directly to the orchestrator.
         // This eliminates the redundant Main LLM "thinking" step that just forwards to orchestrator anyway.
-        if (realtimeTools && rtSettings.subAgentConfigFile) {
-          const agentConfig = loadAgentConfig(rtSettings.subAgentConfigFile);
+        if (realtimeTools && realtimeConfigFile) {
+          const agentConfig = loadAgentConfig(realtimeConfigFile);
           const orchestratorDef = agentConfig?.agents?.find((a: any) => a.role === "orchestrator");
           const rtSession = getRealtimeSession(sessionId);
           if (orchestratorDef && rtSession && rtSession.agents.has(orchestratorDef.id)) {
@@ -811,6 +893,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
               }
 
               socket.emit("chat:chunk", { sessionId, content: "", clear: true });
+              clearSessionProgress(sessionId);
               const fullResponse = orchResult + pendingText +
                 (outputFiles.length > 0 ? `\n\nGenerated files: ${outputFiles.join(", ")}` : "");
 
@@ -840,26 +923,23 @@ img.save('${tmpOut}', 'JPEG', quality=80)
 
         const result = await callTigerBotWithTools(
           chatMessages,
-          await buildSystemPrompt(),
+          await buildSystemPrompt(undefined, sessionId),
           // onToolCall — show status + protocol tags
           (name, args) => {
             toolsUsed.push(name);
             broadcastStatus({ sessionId, status: "tool_call", tool: name, args });
-            // Tag protocol tool usage in chat
-            if (name.startsWith("proto_") && ioRef) {
+            // Record ALL tool calls to progress for chat history persistence
+            if (name.startsWith("proto_")) {
               const protoName = name.replace("proto_", "").split("_")[0].toUpperCase();
-              ioRef.emit("chat:chunk", {
-                sessionId,
-                content: `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> \`${name}\` — ${args.topic || args.peer || args.to || ""}\n`,
-              });
-            }
-            // Tag realtime agent tools in chat
-            if ((name === "send_task" || name === "wait_result") && ioRef) {
+              const protoChunk = `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> \`${name}\` — ${args.topic || args.peer || args.to || ""}\n`;
+              appendSessionProgress(sessionId, protoChunk);
+            } else if (name === "send_task" || name === "wait_result") {
               const targetId = args.to || args.from || "";
-              ioRef.emit("chat:chunk", {
-                sessionId,
-                content: `> <span class="proto-tag proto-bus">AGENT</span> \`${name}\` → ${targetId}\n`,
-              });
+              appendSessionProgress(sessionId, `> **${name === "send_task" ? "📤" : "⏳"} ${name}** → ${targetId}\n`);
+            } else if (name === "select_swarm") {
+              appendSessionProgress(sessionId, `\n> 🏗️ **Auto Swarm** selecting: \`${args.filename || "unknown"}\`${args.reason ? ` — ${args.reason}` : ""}\n`);
+            } else {
+              appendSessionProgress(sessionId, `> ⚙️ \`${name}\`\n`);
             }
             // Update active task with descriptive status for orchestrator tools
             if (name === "send_task") {
@@ -868,6 +948,8 @@ img.save('${tmpOut}', 'JPEG', quality=80)
               activeTask.status = `Running: wait_result — waiting for ${args.from || "agent"}`;
             } else if (name === "check_agents") {
               activeTask.status = `Running: check_agents`;
+            } else if (name === "select_swarm") {
+              activeTask.status = `Running: select_swarm — choosing ${args.filename || "architecture"}`;
             } else {
               activeTask.status = `Running: ${name}`;
             }
@@ -877,13 +959,16 @@ img.save('${tmpOut}', 'JPEG', quality=80)
             activeTask.agentTools["Orchestrator"].push(name);
             activeTask.lastUpdate = new Date().toISOString();
           },
-          // onToolResult — collect output files, show status only
+          // onToolResult — collect output files, record to progress
           (name, toolResult) => {
             broadcastStatus({ sessionId, status: "tool_result", tool: name });
             if (name === "wait_result") {
               activeTask.status = "Agent result received, thinking...";
             } else if (name === "send_task") {
               activeTask.status = "Task delegated, orchestrating...";
+            } else if (name === "select_swarm" && toolResult?.ok) {
+              activeTask.status = `Swarm "${toolResult.systemName}" active (${toolResult.mode})`;
+              appendSessionProgress(sessionId, `\n> ✅ **${toolResult.systemName || toolResult.selected}** — ${toolResult.mode} mode, ${toolResult.agents?.length || 0} agents\n`);
             } else {
               activeTask.status = `${name} done, thinking...`;
             }
@@ -933,6 +1018,9 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         // Clear streaming progress — final response will arrive via chat:response
         socket.emit("chat:chunk", { sessionId, content: "", clear: true });
 
+        // Clear remaining progress (already saved as chat messages by periodic flush)
+        clearSessionProgress(sessionId);
+
         // Strip model thinking/CoT leakage when soul/identity persona is configured
         const hasSoulOrIdentity = !!(settings.soulMd?.trim() || settings.identityMd?.trim());
         const cleanedContent = hasSoulOrIdentity ? stripThinkingFromContent(result.content) : result.content;
@@ -948,11 +1036,10 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         });
         await saveChatHistory(sessions);
         socket.emit("chat:response", { sessionId, content: fullResponse, done: true, files: outputFiles.length > 0 ? outputFiles : undefined });
-        // Notify client the job is complete with files to trigger UI refresh
         broadcastStatus({ sessionId, status: "job_complete", files: outputFiles.length > 0 ? outputFiles : undefined } as any);
       } catch (err: any) {
-        // If aborted, don't fallback — just report cancellation
         if (abortController.signal.aborted) {
+          clearSessionProgress(sessionId);
           const cancelMsg = "Task was cancelled." +
             (outputFiles.length > 0 ? `\n\nGenerated files: ${outputFiles.join(", ")}` : "");
           session.messages.push({
@@ -981,6 +1068,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
             }
           }
           // Fallback to simple call without tools — still include any outputFiles collected during tool calls
+          clearSessionProgress(sessionId);
           try {
             const result = await callTigerBot(chatMessages, await buildSystemPrompt());
             const fbSettings = await getSettings();
@@ -1040,6 +1128,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
               clearTimeout(lateTimeout);
               // All agents finished — now broadcast done and clean up
               broadcastStatus({ sessionId, status: "done" });
+              sessionToTaskId.delete(sessionId);
               activeTasks.delete(taskId);
               taskAbortControllers.delete(taskId);
             } else {
@@ -1061,6 +1150,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
             // Unsubscribe all pending bus listeners to prevent leaks
             for (const u of lateUnsubs) u();
             broadcastStatus({ sessionId, status: "done" });
+            sessionToTaskId.delete(sessionId);
             activeTasks.delete(taskId);
             taskAbortControllers.delete(taskId);
           }, 5 * 60 * 1000);
@@ -1106,6 +1196,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         } else {
           // No agents still working — broadcast done and clean up immediately
           broadcastStatus({ sessionId, status: "done" });
+          sessionToTaskId.delete(sessionId);
           activeTasks.delete(taskId);
           taskAbortControllers.delete(taskId);
         }
@@ -1132,7 +1223,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         : "";
 
       // Build project-aware system prompt (filter skills to only project-selected ones)
-      let projectPrompt = await buildSystemPrompt(project.skills && project.skills.length > 0 ? project.skills : undefined);
+      let projectPrompt = await buildSystemPrompt(project.skills && project.skills.length > 0 ? project.skills : undefined, sessionId);
 
       // Read project memory fresh from {workingFolder}/memory.md every time
       let projectMemory = "";
@@ -1198,6 +1289,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         content: message,
         timestamp: new Date().toISOString(),
       });
+            await saveChatHistory(sessions);
       session.updatedAt = new Date().toISOString();
       await saveChatHistory(sessions);
 
@@ -1408,6 +1500,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
       }
 
       broadcastStatus({ sessionId, status: "thinking" });
+      // No-op: activity log is file-based, no in-memory state to reset
       const outputFiles: string[] = [];
 
       // Track active task for project chat
@@ -1428,6 +1521,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         lastUpdate: new Date().toISOString(),
       };
       activeTasks.set(taskId, activeTask);
+      sessionToTaskId.set(activeTask.sessionId, taskId);
       const abortController = new AbortController();
       taskAbortControllers.set(taskId, abortController);
 
@@ -1435,24 +1529,30 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         // Set call context for sub-agent spawning — pass project working folder so output goes there
         setCallContext(taskId, sessionId, 0, undefined, resolvedWorkingFolder || undefined);
 
-        // Boot realtime agents if in realtime mode
+        // Boot realtime agents if in realtime mode or auto_swarm with a selected config
         const rtSettings = await getSettings();
         let realtimeTools: any[] | undefined;
-        if (rtSettings.subAgentEnabled && rtSettings.subAgentMode === "realtime" && rtSettings.subAgentConfigFile) {
-          const rtSession = await startRealtimeSession(sessionId, rtSettings.subAgentConfigFile, abortController.signal);
+        const autoSwarmConfigFile = rtSettings.subAgentMode === "auto_swarm"
+          ? getAutoSwarmSelection(sessionId)
+          : undefined;
+        const realtimeConfigFile = rtSettings.subAgentMode === "realtime"
+          ? rtSettings.subAgentConfigFile
+          : autoSwarmConfigFile;
+
+        if (rtSettings.subAgentEnabled && realtimeConfigFile) {
+          const rtSession = await startRealtimeSession(sessionId, realtimeConfigFile, abortController.signal);
           if (rtSession) {
             realtimeTools = await getToolsForRealtimeOrchestrator();
             const agentNames = Array.from(rtSession.agents.values()).map(h => `${h.agentDef.name} (${h.agentDef.id})`);
-            socket.emit("chat:chunk", {
-              sessionId,
-              content: `> **Realtime Agents Active:** ${agentNames.join(", ")}\n\n`,
-            });
+            const rtActiveChunk = `> **Realtime Agents Active:** ${agentNames.join(", ")}\n\n`;
+            socket.emit("chat:chunk", { sessionId, content: rtActiveChunk });
+            appendSessionProgress(sessionId, rtActiveChunk);
           }
         }
 
         // ─── Direct Orchestrator Bypass (Project Chat) ───
-        if (realtimeTools && rtSettings.subAgentConfigFile) {
-          const agentConfig = loadAgentConfig(rtSettings.subAgentConfigFile);
+        if (realtimeTools && realtimeConfigFile) {
+          const agentConfig = loadAgentConfig(realtimeConfigFile);
           const orchestratorDef = agentConfig?.agents?.find((a: any) => a.role === "orchestrator");
           const rtSession = getRealtimeSession(sessionId);
           if (orchestratorDef && rtSession && rtSession.agents.has(orchestratorDef.id)) {
@@ -1509,6 +1609,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
               }
 
               socket.emit("chat:chunk", { sessionId, content: "", clear: true });
+              clearSessionProgress(sessionId);
               const fullResponse = orchResult + pendingText +
                 (outputFiles.length > 0 ? `\n\nGenerated files: ${outputFiles.join(", ")}` : "");
 
@@ -1538,21 +1639,17 @@ img.save('${tmpOut}', 'JPEG', quality=80)
           projectPrompt,
           (name, args) => {
             broadcastStatus({ sessionId, status: "tool_call", tool: name, args });
-            // Tag protocol tool usage in chat
-            if (name.startsWith("proto_") && ioRef) {
+            // Record ALL tool calls to progress for chat history persistence
+            if (name.startsWith("proto_")) {
               const protoName = name.replace("proto_", "").split("_")[0].toUpperCase();
-              ioRef.emit("chat:chunk", {
-                sessionId,
-                content: `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> \`${name}\` — ${args.topic || args.peer || args.to || ""}\n`,
-              });
-            }
-            // Tag realtime agent tools in chat
-            if ((name === "send_task" || name === "wait_result") && ioRef) {
+              appendSessionProgress(sessionId, `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> \`${name}\` — ${args.topic || args.peer || args.to || ""}\n`);
+            } else if (name === "send_task" || name === "wait_result") {
               const targetId = args.to || args.from || "";
-              ioRef.emit("chat:chunk", {
-                sessionId,
-                content: `> <span class="proto-tag proto-bus">AGENT</span> \`${name}\` → ${targetId}\n`,
-              });
+              appendSessionProgress(sessionId, `> **${name === "send_task" ? "📤" : "⏳"} ${name}** → ${targetId}\n`);
+            } else if (name === "select_swarm") {
+              appendSessionProgress(sessionId, `\n> 🏗️ **Auto Swarm** selecting: \`${args.filename || "unknown"}\`${args.reason ? ` — ${args.reason}` : ""}\n`);
+            } else {
+              appendSessionProgress(sessionId, `> ⚙️ \`${name}\`\n`);
             }
             // Descriptive active task status for orchestrator tools
             if (name === "send_task") {
@@ -1561,6 +1658,8 @@ img.save('${tmpOut}', 'JPEG', quality=80)
               activeTask.status = `Running: wait_result — waiting for ${args.from || "agent"}`;
             } else if (name === "check_agents") {
               activeTask.status = `Running: check_agents`;
+            } else if (name === "select_swarm") {
+              activeTask.status = `Running: select_swarm — choosing ${args.filename || "architecture"}`;
             } else {
               activeTask.status = `Running: ${name}`;
             }
@@ -1576,6 +1675,9 @@ img.save('${tmpOut}', 'JPEG', quality=80)
               activeTask.status = "Agent result received, thinking...";
             } else if (name === "send_task") {
               activeTask.status = "Task delegated, orchestrating...";
+            } else if (name === "select_swarm" && toolResult?.ok) {
+              activeTask.status = `Swarm "${toolResult.systemName}" active (${toolResult.mode})`;
+              appendSessionProgress(sessionId, `\n> ✅ **${toolResult.systemName || toolResult.selected}** — ${toolResult.mode} mode, ${toolResult.agents?.length || 0} agents\n`);
             } else {
               activeTask.status = `${name} done, thinking...`;
             }
@@ -1619,6 +1721,9 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         // Clear streaming progress and show final AI response
         socket.emit("chat:chunk", { sessionId, content: "", clear: true });
 
+        // Clear remaining progress (already saved as chat messages by periodic flush)
+        clearSessionProgress(sessionId);
+
         // Strip model thinking/CoT leakage when soul/identity persona is configured
         const projSettings = await getSettings();
         const projHasSoul = !!(projSettings.soulMd?.trim() || projSettings.identityMd?.trim());
@@ -1635,9 +1740,9 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         });
         await saveChatHistory(sessions);
         socket.emit("chat:response", { sessionId, content: fullResponse, done: true, files: outputFiles.length > 0 ? outputFiles : undefined });
-        // Notify client the job is complete with files to trigger UI refresh
         broadcastStatus({ sessionId, status: "job_complete", files: outputFiles.length > 0 ? outputFiles : undefined } as any);
       } catch (err: any) {
+        clearSessionProgress(sessionId);
         if (abortController.signal.aborted) {
           const cancelMsg = "Task was cancelled." +
             (outputFiles.length > 0 ? `\n\nGenerated files: ${outputFiles.join(", ")}` : "");
@@ -1650,7 +1755,6 @@ img.save('${tmpOut}', 'JPEG', quality=80)
           await saveChatHistory(sessions);
           socket.emit("chat:response", { sessionId, content: cancelMsg, done: true, files: outputFiles.length > 0 ? outputFiles : undefined });
         } else {
-          // Collect pending agent results even on error
           let projPendingOnError = "";
           {
             const pendingResults = collectPendingResults(sessionId);
@@ -1750,6 +1854,7 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         }
         // Keep realtime session alive between messages for follow-up delegation
 
+        sessionToTaskId.delete(sessionId);
         activeTasks.delete(taskId);
         taskAbortControllers.delete(taskId);
       }
@@ -1798,6 +1903,8 @@ setInterval(async () => {
       if (rtSession) {
         shutdownRealtimeSession(task.sessionId);
       }
+      clearAutoSwarmSelection(task.sessionId);
+      sessionToTaskId.delete(task.sessionId);
       activeTasks.delete(taskId);
     }
   }
