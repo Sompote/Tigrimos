@@ -235,6 +235,9 @@ class VMManager: NSObject, ObservableObject {
         }
 
         // Shared folders via VirtioFS
+        // Try to attach directory shares; if validation fails (e.g. macOS Tahoe
+        // tightened VirtioFS rules), boot without them — provision.sh will
+        // fall back to git-clone.
         var directoryShares: [VZVirtioFileSystemDeviceConfiguration] = []
 
         // Always share the TigrimOS source
@@ -256,7 +259,15 @@ class VMManager: NSObject, ObservableObject {
             directoryShares.append(share)
         }
 
+        // Validate with directory shares first; if it fails, retry without them
         config.directorySharingDevices = directoryShares
+        do {
+            try config.validate()
+        } catch {
+            appendConsole("[TigrimOS] Directory sharing unavailable (\(error.localizedDescription)), booting without shared folders")
+            directoryShares.removeAll()
+            config.directorySharingDevices = []
+        }
 
         // Memory balloon for dynamic memory
         config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]

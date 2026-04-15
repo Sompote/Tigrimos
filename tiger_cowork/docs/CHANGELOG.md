@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.3.0 (2026-04-15)
+**Live Agent Diagram, Async Parallel Sub-Agents, New P2P Algorithm, Terminal Access**
+
+- **Live Agent Diagram** — real-time interactive graph showing orchestrator and worker agents with live status badges (Active/Waiting/Done), current tool calls, connection edge states, and Bus protocol activity bar
+- **Task & Remote Task Logs** — unified chat log panel streams timestamped tool calls, agent reasoning, and inter-agent delegation events
+- **Async Parallel Sub-Agent Algorithm** — agents work in true parallel using async task dispatching; orchestrator delegates via `send_task` and awaits results concurrently with `wait_result`
+- **New P2P Algorithm** — improved peer-to-peer swarm with Contract Net Protocol bidding, confidence-domain routing, and reputation-scored agent selection
+- **Benchmark suite** — performance benchmarks for agent orchestration
+- **Terminal access** — new Terminal tab in sidebar navigation, macOS toolbar button, and Windows batch launcher
+- **Fix macOS Tahoe VM boot** — VirtioFS directory sharing validation now fails gracefully; if the OS rejects shared folders the VM boots without them and provision.sh falls back to git-clone
+
+## v1.2.1 (2026-04-12)
+**Per-Project Agent Overrides, Chat Logs, Finished Tasks**
+
+- **Per-Project Agent Mode Override** — each project can override the global sub-agent mode and pick its own YAML config, architecture type, agent count, and connection protocols
+- **Auto Architecture — AI-Decided Settings** — new "Auto (AI decides)" option for architecture type and agent count
+- **Full Chat Log with Agent Reasoning** — every chat session records a complete log capturing user messages, tool calls, sub-agent reasoning, and final responses
+- **Finished Tasks History** — Tasks page shows the last 100 completed/cancelled/errored tasks with status, duration, agents used, and tools called
+
+## v1.2.0 (2026-04-11)
+**Kimi Provider, VM Improvements**
+
+- **Kimi as built-in AI provider** — Kimi (Moonshot AI) added as a default provider in Settings
+- **Simplified VM disk attachment** — use `VZDiskImageStorageDeviceAttachment` for raw disk files instead of block device, fixing compatibility across macOS versions
+
 ## v1.1.1 (2026-04-08)
 **Soul & Identity, Chat Fixes**
 
