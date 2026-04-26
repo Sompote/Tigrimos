@@ -6,6 +6,8 @@
 
 A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, **cross-machine remote agents**, **Auto (AI create architecture)**, **live agent diagram**, **async parallel sub-agents**, and a skill marketplace. Runs on **macOS** and **Windows**. Everything executes inside a **secure Ubuntu sandbox** — no Docker required.
 
+If you want a Chinese-language place to search and install skills, also check out [Skills宝](https://skilery.com).
+
 AI-generated code and shell commands **cannot escape the sandbox** or touch your files without permission. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. **Delegate tasks to remote TigrimOS instances** running on other machines — the orchestrator chooses the right agent based on persona and responsibility. **Auto mode** lets the AI analyze your prompt, design a custom multi-agent architecture (YAML), and boot all agents automatically — no manual configuration needed. **Live Agent Diagram** shows real-time orchestrator/worker graphs with status badges, tool tracking, and edge states. Agents work in **true parallel** using async task dispatching with improved **P2P swarm governance**. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
 
 ## What's New in v1.3.1
