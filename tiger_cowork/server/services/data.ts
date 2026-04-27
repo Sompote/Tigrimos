@@ -109,6 +109,11 @@ export function runWithSettingsOverride<T>(overrides: Partial<Settings>, fn: () 
 
 export async function getSettings(): Promise<Settings> {
   const settings = await readJSON("settings.json") as Settings;
+  // Apply defaults for skill auto-update (so new installs start with these on)
+  if (settings.skillAutoUpdateEnabled === undefined) settings.skillAutoUpdateEnabled = true;
+  if (settings.skillAutoUpdateIntervalMinutes === undefined) settings.skillAutoUpdateIntervalMinutes = 5;
+  if (settings.skillAutoUpdateRequireApproval === undefined) settings.skillAutoUpdateRequireApproval = true;
+  if (settings.skillAutoUpdateHumanFeedbackEnabled === undefined) settings.skillAutoUpdateHumanFeedbackEnabled = true;
   const overrides = _settingsOverrideStore.getStore();
   if (overrides) {
     return { ...settings, ...overrides };

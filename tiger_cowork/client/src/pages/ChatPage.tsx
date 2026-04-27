@@ -929,44 +929,6 @@ export default function ChatPage() {
             </svg>
             <span>Export</span>
           </button>
-          {activeSession && messages.length > 0 && (
-            <div style={{ display: "flex", gap: 4, marginLeft: 8, borderLeft: "1px solid rgba(255,255,255,0.15)", paddingLeft: 8 }}>
-              <button
-                className={`activity-log-toggle ${skillCandidate ? "active" : ""}`}
-                onClick={handleSkillCandidate}
-                disabled={feedbackSaving}
-                title={skillCandidate ? "Unmark as skill candidate" : "Mark this chat as a skill candidate for auto-generation"}
-                style={skillCandidate ? { borderColor: "#8b5cf6", color: "#8b5cf6", background: "rgba(139, 92, 246, 0.15)" } : {}}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill={skillCandidate ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
-                <span>Skill</span>
-              </button>
-              <button
-                className={`activity-log-toggle ${skillFeedback === "positive" ? "active" : ""}`}
-                onClick={() => handleSkillFeedback("positive")}
-                disabled={feedbackSaving}
-                title="Good chat — useful for skill generation"
-                style={skillFeedback === "positive" ? { borderColor: "#137333", color: "#34a853", background: "rgba(52, 168, 83, 0.15)" } : {}}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                </svg>
-              </button>
-              <button
-                className={`activity-log-toggle ${skillFeedback === "negative" ? "active" : ""}`}
-                onClick={() => handleSkillFeedback("negative")}
-                disabled={feedbackSaving}
-                title="Not useful — skip for skill generation"
-                style={skillFeedback === "negative" ? { borderColor: "#c5221f", color: "#ea4335", background: "rgba(234, 67, 53, 0.15)" } : {}}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
-                </svg>
-              </button>
-            </div>
-          )}
           {autoCreatedArch && (
             <button
               className="activity-log-toggle active"
@@ -1048,36 +1010,6 @@ export default function ChatPage() {
               <div key={i} className={`message ${msg.role}`}>
                 <div className="message-avatar">{msg.role === "user" ? "U" : "C"}</div>
                 <div className="message-content">
-                  {msg.role === "assistant" ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
-                  ) : (
-                    <>
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="message-attachments">
-                          {msg.attachments.map((f, j) => (
-                            <div key={j} className="attachment-item">
-                              {isImageFile(f.name) ? (
-                                <img src={sandboxUrl(f.path)} alt={f.name} className="attachment-image-preview" />
-                              ) : (
-                                <div className="attachment-icon">{getFileIcon(f.name)}</div>
-                              )}
-                              <div className="attachment-info">
-                                <span className="attachment-name">{f.name}</span>
-                                <span className="attachment-size">{formatFileSize(f.size)}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <p>{msg.content.replace(/\[Attached file:.*?\]/g, "").trim()}</p>
-                    </>
-                  )}
-                  {msg.files && msg.files.length > 0 && (
-                    <div className="message-output-indicator" onClick={() => setOutputPanelOpen(true)}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
-                      {msg.files.length} output{msg.files.length > 1 ? "s" : ""} — view in panel
-                    </div>
-                  )}
                   {/* Per-message feedback (assistant only, when human feedback enabled) */}
                   {humanFeedbackEnabled && msg.role === "assistant" && (
                     <>
@@ -1133,6 +1065,36 @@ export default function ChatPage() {
                         </div>
                       )}
                     </>
+                  )}
+                  {msg.role === "assistant" ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
+                  ) : (
+                    <>
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div className="message-attachments">
+                          {msg.attachments.map((f, j) => (
+                            <div key={j} className="attachment-item">
+                              {isImageFile(f.name) ? (
+                                <img src={sandboxUrl(f.path)} alt={f.name} className="attachment-image-preview" />
+                              ) : (
+                                <div className="attachment-icon">{getFileIcon(f.name)}</div>
+                              )}
+                              <div className="attachment-info">
+                                <span className="attachment-name">{f.name}</span>
+                                <span className="attachment-size">{formatFileSize(f.size)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <p>{msg.content.replace(/\[Attached file:.*?\]/g, "").trim()}</p>
+                    </>
+                  )}
+                  {msg.files && msg.files.length > 0 && (
+                    <div className="message-output-indicator" onClick={() => setOutputPanelOpen(true)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+                      {msg.files.length} output{msg.files.length > 1 ? "s" : ""} — view in panel
+                    </div>
                   )}
                 </div>
               </div>

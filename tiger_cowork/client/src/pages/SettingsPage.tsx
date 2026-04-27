@@ -1400,11 +1400,11 @@ function SkillAutoUpdateSection({ settings, setSettings }: { settings: any; setS
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<string | null>(null);
 
-  const enabled = !!settings.skillAutoUpdateEnabled;
-  const interval = settings.skillAutoUpdateIntervalMinutes ?? 60;
+  const enabled = settings.skillAutoUpdateEnabled !== false;
+  const interval = settings.skillAutoUpdateIntervalMinutes ?? 5;
   const maxCandidates = settings.skillAutoUpdateMaxCandidates ?? 30;
   const requireApproval = settings.skillAutoUpdateRequireApproval !== false;
-  const humanFeedback = !!settings.skillAutoUpdateHumanFeedbackEnabled;
+  const humanFeedback = settings.skillAutoUpdateHumanFeedbackEnabled !== false;
 
   const runNow = async () => {
     setRunning(true);
