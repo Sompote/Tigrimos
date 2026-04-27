@@ -1,8 +1,17 @@
 ![Tiger CoWork Banner](picture/screen_read.png)
 
-# Tiger CoWork v1.3.1
+# Tiger CoWork v1.4.0
 
 A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, cross-machine agent connection, and a skill marketplace. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. Connect agents across machines on your network so distributed teams can collaborate in real time. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
+
+## What's New in v1.4.0
+
+- **Host Folders** — browse and edit files on your host machine via VM shared folders directly from the Files page. UTM/VirtFS, VirtualBox, and VMware shared folders are auto-detected with proper labels and permissions. The AI agent is aware of all connected host folders and can read/write them.
+- **Per-message feedback** — thumbs up/down and comment buttons on each assistant message in chat, feeding into the skill auto-update synthesizer so liked answers reinforce skills and disliked ones get corrected.
+- **VM shared folder auto-detection** — parses `/proc/mounts` to identify 9p, virtiofs, vboxsf, and VMware FUSE mounts. Uses the mount tag (UTM share name) as the label instead of generic `shared-0` names. Host-origin folders are tagged with a green "Host" badge.
+- **Files page tabs** — Sandbox and Host Folders tabs in the Files page. Local Files removed from sidebar to reduce confusion.
+- **Agent host folder awareness** — all enabled host folder mounts with paths and permissions are injected into the AI agent's system prompt, so the agent can read from and write to shared folders.
+- **Cross-browser local file access** — rewrote Local Files from Chrome-only File System Access API to server-side API, working in all browsers.
 
 ## What's New in v1.3.1
 

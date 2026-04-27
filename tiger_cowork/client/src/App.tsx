@@ -8,6 +8,7 @@ import SkillsPage from "./pages/SkillsPage";
 import SettingsPage from "./pages/SettingsPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import TerminalPage from "./pages/TerminalPage";
+import LocalFilesPage from "./pages/LocalFilesPage";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/" element={<ChatPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/files" element={<FilesPage />} />
+          <Route path="/local-files" element={<LocalFilesPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/terminal" element={<TerminalPage />} />

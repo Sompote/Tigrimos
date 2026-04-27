@@ -5,8 +5,9 @@ import path from "path";
 import fs from "fs";
 import AdmZip from "adm-zip";
 import yaml from "js-yaml";
-import { getSkills, saveSkills } from "../services/data";
+import { getSkills, saveSkills, getSettings, getChatHistory, saveChatHistory } from "../services/data";
 import { listInstalledSkills } from "../services/clawhub";
+import { runSkillSynthesis, approveSkill, rejectSkill, getProposedDiff } from "../services/skill-synthesizer";
 
 /** Parse SKILL.md frontmatter and return name + description */
 function parseFrontmatter(content: string): { name: string; description: string } {
@@ -236,5 +237,149 @@ export async function skillsRoutes(fastify: FastifyInstance) {
       { name: "Image Processor", description: "Resize, crop, and convert images", source: "openclaw", script: "image-processor" },
     ];
     return catalog;
+  });
+
+  // ─── View / Download Skill Content ───
+
+  // Helper to find a skill's SKILL.md file on disk
+  function findSkillFile(skill: { name: string; script: string; source: string }): string | null {
+    const slug = skill.script || skill.name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+    // Check custom/auto skills dir first
+    const customPath = path.join(process.cwd(), "skills", slug, "SKILL.md");
+    if (fs.existsSync(customPath)) return customPath;
+    // Check ClawHub skills dir
+    const clawhubPath = path.join(process.cwd(), "Tiger_bot", "skills", slug, "SKILL.md");
+    if (fs.existsSync(clawhubPath)) return clawhubPath;
+    // Try by name as slug
+    const nameSlug = skill.name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+    const customPath2 = path.join(process.cwd(), "skills", nameSlug, "SKILL.md");
+    if (fs.existsSync(customPath2)) return customPath2;
+    const clawhubPath2 = path.join(process.cwd(), "Tiger_bot", "skills", nameSlug, "SKILL.md");
+    if (fs.existsSync(clawhubPath2)) return clawhubPath2;
+    return null;
+  }
+
+  // Read skill content (SKILL.md)
+  fastify.get("/:id/content", async (request, reply) => {
+    const skills = await getSkills();
+    const skill = skills.find((s) => s.id === (request.params as any).id);
+    if (!skill) { reply.code(404); return { error: "Skill not found" }; }
+
+    const filePath = findSkillFile(skill);
+    if (!filePath) {
+      // For custom skills with inline script, return the script as content
+      if (skill.script && !skill.script.includes("/")) {
+        return { ok: true, name: skill.name, content: skill.script, source: skill.source, hasFile: false };
+      }
+      return { ok: false, error: "SKILL.md file not found on disk" };
+    }
+
+    const content = fs.readFileSync(filePath, "utf-8");
+    return { ok: true, name: skill.name, content, source: skill.source, hasFile: true, path: filePath };
+  });
+
+  // Download skill as SKILL.md file
+  fastify.get("/:id/download", async (request, reply) => {
+    const skills = await getSkills();
+    const skill = skills.find((s) => s.id === (request.params as any).id);
+    if (!skill) { reply.code(404); return { error: "Skill not found" }; }
+
+    const filePath = findSkillFile(skill);
+    if (!filePath) {
+      // Inline script — generate a SKILL.md on the fly
+      const slug = skill.name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+      const content = `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n\n${skill.script || ""}`;
+      reply.header("Content-Type", "text/markdown");
+      reply.header("Content-Disposition", `attachment; filename="${slug}.SKILL.md"`);
+      return content;
+    }
+
+    const slug = skill.script || skill.name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+    const content = fs.readFileSync(filePath, "utf-8");
+    reply.header("Content-Type", "text/markdown");
+    reply.header("Content-Disposition", `attachment; filename="${slug}.SKILL.md"`);
+    return content;
+  });
+
+  // ─── Auto Skill Generation ───
+
+  // Trigger synthesis immediately
+  fastify.post("/auto/run-now", async (request, reply) => {
+    try {
+      const result = await runSkillSynthesis({ manual: true });
+      return result;
+    } catch (err: any) {
+      reply.code(500);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Get auto-update status
+  fastify.get("/auto/status", async (request, reply) => {
+    const settings = await getSettings();
+    return {
+      enabled: settings.skillAutoUpdateEnabled ?? true,
+      intervalMinutes: settings.skillAutoUpdateIntervalMinutes ?? 60,
+      maxCandidates: settings.skillAutoUpdateMaxCandidates ?? 30,
+      requireApproval: settings.skillAutoUpdateRequireApproval !== false,
+      cursor: settings.skillAutoUpdateCursor || null,
+      lastRunAt: settings.skillAutoUpdateLastRunAt || null,
+      lastRunSummary: settings.skillAutoUpdateLastRunSummary || null,
+    };
+  });
+
+  // Approve pending skill
+  fastify.post("/:id/approve", async (request, reply) => {
+    const result = await approveSkill((request.params as any).id);
+    if (!result.ok) { reply.code(400); }
+    return result;
+  });
+
+  // Reject pending skill
+  fastify.post("/:id/reject", async (request, reply) => {
+    const result = await rejectSkill((request.params as any).id);
+    if (!result.ok) { reply.code(400); }
+    return result;
+  });
+
+  // Get proposed diff
+  fastify.get("/:id/proposed-diff", async (request, reply) => {
+    const result = await getProposedDiff((request.params as any).id);
+    if (!result.ok) { reply.code(404); }
+    return result;
+  });
+
+  // ─── Chat Skill Feedback ───
+
+  // Mark/unmark a chat session as skill candidate
+  fastify.post("/feedback", async (request, reply) => {
+    const body = request.body as any;
+    const { sessionId, skillCandidate, skillFeedback } = body;
+    if (!sessionId) { reply.code(400); return { error: "Missing sessionId" }; }
+
+    const sessions = await getChatHistory();
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) { reply.code(404); return { error: "Session not found" }; }
+
+    if (skillCandidate !== undefined) (session as any).skillCandidate = skillCandidate;
+    if (skillFeedback !== undefined) (session as any).skillFeedback = skillFeedback;
+    session.updatedAt = new Date().toISOString();
+    await saveChatHistory(sessions);
+
+    return { ok: true, sessionId, skillCandidate: (session as any).skillCandidate, skillFeedback: (session as any).skillFeedback };
+  });
+
+  // Get feedback status for a session
+  fastify.get("/feedback/:sessionId", async (request, reply) => {
+    const sessionId = (request.params as any).sessionId;
+    const sessions = await getChatHistory();
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) { reply.code(404); return { error: "Session not found" }; }
+    return {
+      ok: true,
+      sessionId,
+      skillCandidate: (session as any).skillCandidate || false,
+      skillFeedback: (session as any).skillFeedback || null,
+    };
   });
 }

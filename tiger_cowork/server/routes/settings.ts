@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { getSettings, saveSettings, getFileTokens, saveFileTokens, generateToken } from "../services/data";
 import { connectServer, disconnectServer, getMcpStatus, initMcpServers } from "../services/mcp";
 import { remoteTask } from "../services/remote";
+import { restartSkillSynthesizer } from "../services/skill-synthesizer";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -110,6 +111,8 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       });
     }
     await saveSettings(updated);
+    // Restart skill synthesizer cron if settings changed
+    restartSkillSynthesizer().catch(console.error);
     return { success: true };
   });
 

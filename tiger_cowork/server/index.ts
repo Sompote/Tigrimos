@@ -20,10 +20,12 @@ import { clawhubRoutes } from "./routes/clawhub";
 import { projectsRoutes } from "./routes/projects";
 import { agentsRoutes } from "./routes/agents";
 import { remoteRoutes } from "./routes/remote";
+import { localFilesRoutes } from "./routes/local-files";
 import { terminalRoutes, setupTerminalSocket } from "./routes/terminal";
 import { setupSocket } from "./services/socket";
 import { initMcpServers } from "./services/mcp";
 import { initScheduler } from "./services/scheduler";
+import { initSkillSynthesizer } from "./services/skill-synthesizer";
 import { getFileTokens, saveFileTokens, generateToken, isValidFileToken, getSettings } from "./services/data";
 
 dotenv.config();
@@ -155,6 +157,7 @@ async function start() {
       api.register(agentsRoutes, { prefix: "/agents" });
       api.register(remoteRoutes, { prefix: "/remote" });
       api.register(terminalRoutes, { prefix: "/terminal" });
+      api.register(localFilesRoutes, { prefix: "/local-files" });
     },
     { prefix: "/api" }
   );
@@ -212,6 +215,9 @@ async function start() {
 
   // Initialize scheduler
   await initScheduler();
+
+  // Initialize skill auto-update synthesizer
+  await initSkillSynthesizer();
 
   // Vite dev middleware or production static files
   if (process.env.NODE_ENV !== "production") {

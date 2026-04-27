@@ -17,6 +17,7 @@ interface Project {
   workingFolder: string;
   memory: string;
   skills: string[];
+  systemPrompt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -911,7 +912,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [sortMode, setSortMode] = useState<"name" | "updated">(() => (localStorage.getItem("projectSortMode") as "name" | "updated") || "updated");
   const [activeProject, setActiveProject] = useState<Project | null>(null);
-  const [tab, setTab] = useState<"chat" | "overview" | "memory" | "skills" | "files">("chat");
+  const [tab, setTab] = useState<"chat" | "overview" | "tiger-md" | "memory" | "skills" | "files">("chat");
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -933,6 +934,11 @@ export default function ProjectsPage() {
   const [agentOverride, setAgentOverride] = useState<any>({});
   const [agentConfigs, setAgentConfigs] = useState<any[]>([]);
   const [showAgentDetail, setShowAgentDetail] = useState(false);
+  const [editSystemPrompt, setEditSystemPrompt] = useState("");
+  const [tigerMdContent, setTigerMdContent] = useState("");
+  const [tigerMdDirty, setTigerMdDirty] = useState(false);
+  const [tigerMdSaving, setTigerMdSaving] = useState(false);
+  const [tigerMdEditing, setTigerMdEditing] = useState(false);
 
   useEffect(() => {
     api.getProjects().then(setProjects);
@@ -951,6 +957,12 @@ export default function ProjectsPage() {
       });
       setMemoryDirty(false);
       setMemoryEditing(false);
+      // Fetch tiger.md
+      api.getProjectTigerMd(activeProject.id).then((data: any) => {
+        setTigerMdContent(data.content || "");
+      }).catch(() => setTigerMdContent(""));
+      setTigerMdDirty(false);
+      setTigerMdEditing(false);
       setFilePath("");
       loadFiles(activeProject, "");
     }
@@ -997,6 +1009,19 @@ export default function ProjectsPage() {
     setMemoryEditing(false);
   };
 
+  const saveTigerMd = async () => {
+    if (!activeProject) return;
+    setTigerMdSaving(true);
+    try {
+      await api.saveProjectTigerMd(activeProject.id, tigerMdContent);
+      setTigerMdDirty(false);
+      setTigerMdEditing(false);
+    } catch (err: any) {
+      alert(err.message || "Failed to save tiger.md");
+    }
+    setTigerMdSaving(false);
+  };
+
   const generateMemory = async () => {
     if (!activeProject) return;
     setMemoryGenerating(true);
@@ -1030,6 +1055,7 @@ export default function ProjectsPage() {
       name: editName.trim() || activeProject.name,
       description: editDesc.trim(),
       workingFolder: editFolder.trim(),
+      systemPrompt: editSystemPrompt,
       agentOverride: agentOverride.enabled ? agentOverride : { enabled: false },
     });
     setActiveProject(project);
@@ -1042,6 +1068,7 @@ export default function ProjectsPage() {
     setEditName(activeProject.name);
     setEditDesc(activeProject.description);
     setEditFolder(activeProject.workingFolder);
+    setEditSystemPrompt(activeProject.systemPrompt || "");
     setAgentOverride((activeProject as any).agentOverride || {});
     setEditing(true);
   };
@@ -1138,6 +1165,7 @@ export default function ProjectsPage() {
   const TABS = [
     { key: "chat" as const, label: "Chat" },
     { key: "overview" as const, label: "Overview" },
+    { key: "tiger-md" as const, label: "tiger.md" },
     { key: "memory" as const, label: "Memory" },
     { key: "skills" as const, label: "Skills" },
     { key: "files" as const, label: "Files" },
@@ -1194,12 +1222,36 @@ export default function ProjectsPage() {
               onChange={(e) => setNewDesc(e.target.value)}
             />
             <div>
-              <input
-                placeholder="Folder name (optional, e.g. my-project)"
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-              />
-              {sandboxDir && <span className="hint" style={{ fontSize: 10 }}>Path: {sandboxDir}/{newFolder || "..."}</span>}
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  placeholder="Folder name or absolute path (e.g. /Users/me/projects/app)"
+                  value={newFolder}
+                  onChange={(e) => setNewFolder(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                {typeof (window as any).showDirectoryPicker === "function" && (
+                  <button className="btn btn-secondary btn-sm" onClick={async () => {
+                    try {
+                      const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+                      // Validate path on server to get absolute path
+                      const res = await api.validateLocalPath(handle.name);
+                      if (res.resolvedPath && res.isDirectory) {
+                        setNewFolder(res.resolvedPath);
+                      } else {
+                        // Browser API doesn't expose full path — ask user to type it
+                        setNewFolder(handle.name);
+                      }
+                    } catch (err: any) {
+                      if (err.name !== "AbortError") console.error(err);
+                    }
+                  }}>Browse</button>
+                )}
+              </div>
+              {newFolder.startsWith("/") ? (
+                <span className="hint" style={{ fontSize: 10 }}>Local folder: {newFolder} (agent works directly here)</span>
+              ) : sandboxDir ? (
+                <span className="hint" style={{ fontSize: 10 }}>Sandbox path: {sandboxDir}/{newFolder || "..."}</span>
+              ) : null}
             </div>
             <div className="project-create-actions">
               <button className="btn btn-primary btn-sm" onClick={createProject} disabled={!newName.trim()}>Create</button>
@@ -1328,8 +1380,41 @@ export default function ProjectsPage() {
                 </div>
                 <div className="form-group">
                   <label>Working Folder</label>
-                  <input value={editFolder} onChange={(e) => setEditFolder(e.target.value)} placeholder="Folder name (e.g. my-project)" />
-                  {sandboxDir && <span className="hint" style={{ fontSize: 10 }}>Path: {sandboxDir}/{editFolder || "..."}</span>}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input value={editFolder} onChange={(e) => setEditFolder(e.target.value)} placeholder="Folder name or absolute path (e.g. /Users/me/projects/app)" style={{ flex: 1 }} />
+                    {typeof (window as any).showDirectoryPicker === "function" && (
+                      <button className="btn btn-secondary btn-sm" onClick={async () => {
+                        try {
+                          const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+                          const res = await api.validateLocalPath(handle.name);
+                          if (res.resolvedPath && res.isDirectory) {
+                            setEditFolder(res.resolvedPath);
+                          } else {
+                            setEditFolder(handle.name);
+                          }
+                        } catch (err: any) {
+                          if (err.name !== "AbortError") console.error(err);
+                        }
+                      }}>Browse</button>
+                    )}
+                  </div>
+                  {editFolder.startsWith("/") ? (
+                    <span className="hint" style={{ fontSize: 10 }}>Local folder: {editFolder} (agent works directly here)</span>
+                  ) : sandboxDir ? (
+                    <span className="hint" style={{ fontSize: 10 }}>Sandbox path: {sandboxDir}/{editFolder || "..."}</span>
+                  ) : null}
+                </div>
+
+                <div className="form-group">
+                  <label>System Prompt</label>
+                  <p className="hint" style={{ margin: "0 0 6px", fontSize: 11 }}>Custom instructions prepended to every AI message in this project. Use it for persona, tone, constraints, or domain-specific rules.</p>
+                  <textarea
+                    rows={4}
+                    value={editSystemPrompt}
+                    onChange={(e) => setEditSystemPrompt(e.target.value)}
+                    placeholder="e.g. You are a senior Python developer. Always use type hints. Follow PEP 8 conventions."
+                    style={{ width: "100%", fontFamily: "monospace", fontSize: 13 }}
+                  />
                 </div>
 
                 {/* Agent Mode Override */}
@@ -1503,7 +1588,14 @@ export default function ProjectsPage() {
                       <div className="overview-card-icon"><Icon name="folder" /></div>
                       <div className="overview-card-info">
                         <strong>Working Folder</strong>
-                        <span>{activeProject.workingFolder || "Not set"}</span>
+                        <span>{activeProject.workingFolder ? (activeProject.workingFolder.startsWith("/") ? `Local: ${activeProject.workingFolder}` : activeProject.workingFolder) : "Not set"}</span>
+                      </div>
+                    </div>
+                    <div className="overview-card" onClick={() => setTab("tiger-md")}>
+                      <div className="overview-card-icon"><Icon name="chat" /></div>
+                      <div className="overview-card-info">
+                        <strong>tiger.md</strong>
+                        <span>{tigerMdContent ? `${tigerMdContent.split("\n").length} lines` : "Not set"}</span>
                       </div>
                     </div>
                     <div className="overview-card" onClick={() => setTab("memory")}>
@@ -1525,6 +1617,56 @@ export default function ProjectsPage() {
                     <span>Created: {new Date(activeProject.createdAt).toLocaleDateString()}</span>
                     <span>Updated: {new Date(activeProject.updatedAt).toLocaleDateString()}</span>
                   </div>
+                </div>
+              )}
+
+              {tab === "tiger-md" && (
+                <div className="project-memory">
+                  <div className="memory-header">
+                    <div>
+                      <h3>tiger.md</h3>
+                      <p className="hint">Project instruction file — like CLAUDE.md. The agent reads this as context every time you chat in this project. Use it to define coding conventions, architecture rules, preferred tools, or anything the agent should always know.</p>
+                    </div>
+                    <div className="memory-actions">
+                      {tigerMdEditing ? (
+                        <>
+                          {tigerMdDirty && (
+                            <button className="btn btn-primary btn-sm" onClick={saveTigerMd} disabled={tigerMdSaving}>
+                              {tigerMdSaving ? "Saving..." : "Save"}
+                            </button>
+                          )}
+                          <button className="btn btn-ghost btn-sm" onClick={() => { api.getProjectTigerMd(activeProject.id).then((d: any) => setTigerMdContent(d.content || "")); setTigerMdDirty(false); setTigerMdEditing(false); }}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn btn-ghost btn-sm" onClick={() => setTigerMdEditing(true)}>
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {tigerMdEditing ? (
+                    <textarea
+                      className="memory-editor"
+                      value={tigerMdContent}
+                      onChange={(e) => { setTigerMdContent(e.target.value); setTigerMdDirty(true); }}
+                      placeholder={"# Tiger Project Instructions\n\nDefine project-level instructions here.\n\n## Code Style\n- Use TypeScript strict mode\n- Follow ESLint rules\n\n## Architecture\n- ...\n\n## Conventions\n- ..."}
+                      autoFocus
+                    />
+                  ) : (
+                    <div className="memory-view">
+                      {tigerMdContent ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{tigerMdContent}</ReactMarkdown>
+                      ) : (
+                        <div className="memory-empty">
+                          <p>No tiger.md file yet.</p>
+                          <p style={{ fontSize: 12, opacity: 0.6 }}>Create one to give the agent persistent instructions for this project. The file will be saved at <code>{activeProject.workingFolder || "(no folder)"}/tiger.md</code></p>
+                          <button className="btn btn-primary btn-sm" onClick={() => setTigerMdEditing(true)}>Create tiger.md</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

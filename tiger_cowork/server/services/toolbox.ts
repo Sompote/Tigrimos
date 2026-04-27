@@ -72,7 +72,7 @@ const builtinTools = [
     type: "function" as const,
     function: {
       name: "run_python",
-      description: "Execute Python code in the sandbox. Working directory is output_file/. Use PROJECT_DIR variable to access project files (e.g. os.path.join(PROJECT_DIR, 'uploads/file.xlsx')). Returns stdout, stderr, and any generated files.",
+      description: "Execute Python code. Working directory is the project folder (or output_file/ if no project). Use PROJECT_DIR variable to access project files. Returns stdout, stderr, and any generated files. Can also access local mounted host directories — use absolute paths from list_local_mounts to read/write files outside the sandbox.",
       parameters: {
         type: "object",
         properties: {
@@ -106,7 +106,7 @@ const builtinTools = [
     type: "function" as const,
     function: {
       name: "run_shell",
-      description: "Execute a shell command. Use for installing packages, git operations, system tasks, etc.",
+      description: "Execute a shell command in the project folder (or sandbox if no project). Use for installing packages, git operations, system tasks, etc. Can access local mounted host directories — pass the mount's absolute path as cwd to work in it.",
       parameters: {
         type: "object",
         properties: {
@@ -121,11 +121,11 @@ const builtinTools = [
     type: "function" as const,
     function: {
       name: "read_file",
-      description: "Read a file from disk. Returns content (truncated if very large).",
+      description: "Read a file from disk. Supports sandbox files and local mounted host directories (use absolute path from list_local_mounts). Returns content (truncated if very large). For binary files returns metadata only.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "File path to read" },
+          path: { type: "string", description: "File path to read (absolute path for local mounts, relative for sandbox)" },
         },
         required: ["path"],
       },
@@ -135,11 +135,11 @@ const builtinTools = [
     type: "function" as const,
     function: {
       name: "write_file",
-      description: "Write or append content to a file on disk.",
+      description: "Write or append content to a file on disk. Supports sandbox files and local mounted host directories with readwrite permission (use absolute path from list_local_mounts).",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "File path" },
+          path: { type: "string", description: "File path (absolute path for local mounts, relative for sandbox)" },
           content: { type: "string", description: "Content to write" },
           append: { type: "boolean", description: "Append instead of overwrite" },
         },
@@ -151,14 +151,36 @@ const builtinTools = [
     type: "function" as const,
     function: {
       name: "list_files",
-      description: "List files and directories at a given path.",
+      description: "List files and directories at a given path. Supports sandbox files and local mounted host directories (use absolute path from list_local_mounts).",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Directory path (default: sandbox root)" },
+          path: { type: "string", description: "Directory path (absolute path for local mounts, default: sandbox root)" },
           recursive: { type: "boolean", description: "List recursively" },
         },
       },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "delete_file",
+      description: "Delete a file or empty directory. Supports sandbox files and local mounted host directories with readwrite permission (use absolute path from list_local_mounts).",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File or directory path to delete (absolute path for local mounts, relative for sandbox)" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "list_local_mounts",
+      description: "List locally mounted host directories that are accessible outside the sandbox. Returns mount labels, absolute paths, and permissions. Use the ABSOLUTE paths returned here with read_file, write_file, list_files, delete_file, run_python (via absolute paths in code), and run_shell (pass mount path as cwd).",
+      parameters: { type: "object", properties: {} },
     },
   },
   {
@@ -332,7 +354,7 @@ const remoteTaskTool = {
   type: "function" as const,
   function: {
     name: "remote_task",
-    description: "Delegate a task to a Tiger Cowork instance running on another machine. The remote instance processes the task with its own LLM and tools, then returns the result. Use this for offloading work to a cloud PC, lab server, or any peer machine running Tiger Cowork.",
+    description: "Delegate a task to a TigrimOS instance running on another machine. The remote instance processes the task with its own LLM and tools, then returns the result. Use this for offloading work to a cloud PC, lab server, or any peer machine running TigrimOS.",
     parameters: {
       type: "object",
       properties: {
@@ -1134,7 +1156,10 @@ async function runShell(args: { command?: string; cmd?: string; cwd?: string }):
   const command = args.command || args.cmd;
   if (!command) return { ok: false, error: "No command provided" };
   const settings = await getSettings();
-  const cwd = args.cwd && fs.existsSync(args.cwd) ? args.cwd : resolveSandboxDir(settings.sandboxDir);
+  // Priority: explicit cwd arg > project working folder > sandbox
+  const projectFolder = getCurrentProjectWorkingFolder();
+  const defaultCwd = (projectFolder && fs.existsSync(projectFolder)) ? projectFolder : resolveSandboxDir(settings.sandboxDir);
+  const cwd = args.cwd && fs.existsSync(args.cwd) ? args.cwd : defaultCwd;
   try {
     const { stdout, stderr } = await execAsync(command, {
       cwd,
@@ -1150,8 +1175,22 @@ async function runShell(args: { command?: string; cmd?: string; cwd?: string }):
 function readFileTool(args: { path?: string; file?: string; filepath?: string }): any {
   const filePath = args.path || args.file || args.filepath;
   if (!filePath) return { ok: false, error: "No path provided" };
-  const target = path.resolve(filePath);
+  // Resolve relative paths against project working folder if available
+  let target: string;
+  if (path.isAbsolute(filePath)) {
+    target = path.resolve(filePath);
+  } else {
+    const projectFolder = getCurrentProjectWorkingFolder();
+    target = projectFolder ? path.resolve(projectFolder, filePath) : path.resolve(filePath);
+  }
   if (!fs.existsSync(target)) return { ok: false, error: "File not found: " + target };
+  // Check if binary — return metadata instead of garbled content
+  const ext = path.extname(target).toLowerCase();
+  const binaryExts = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".tar", ".gz", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".mp4", ".mp3", ".wav", ".ogg", ".webm", ".exe", ".bin", ".dmg", ".iso"];
+  if (binaryExts.includes(ext)) {
+    const stat = fs.statSync(target);
+    return { ok: true, path: target, binary: true, size: stat.size, extension: ext, message: `Binary file (${ext}, ${(stat.size / 1024).toFixed(1)} KB). Use the Local Files browser or download to view this file. For PDFs, the user can view them in the Files page preview.` };
+  }
   const content = fs.readFileSync(target, "utf8");
   return { ok: true, path: target, content: content.slice(0, 30000), truncated: content.length > 30000 };
 }
@@ -1159,9 +1198,26 @@ function readFileTool(args: { path?: string; file?: string; filepath?: string })
 async function writeFileTool(args: { path: string; content: string; append?: boolean }): Promise<any> {
   const settings = await getSettings();
   const sandboxDir = resolveSandboxDir(settings.sandboxDir);
-  const outputDir = getCurrentProjectWorkingFolder() || path.join(sandboxDir, "output_file");
-  fs.mkdirSync(outputDir, { recursive: true });
-  const target = path.resolve(outputDir, args.path);
+
+  // If path is absolute, check if it's inside an enabled local mount with write permission
+  let target: string;
+  if (path.isAbsolute(args.path)) {
+    const mounts = (settings.localFileMounts || []).filter((m: any) => m.enabled && m.permissions === "readwrite");
+    const resolved = path.resolve(args.path);
+    const inMount = mounts.some((m: any) => resolved.startsWith(path.resolve(m.path) + path.sep) || resolved === path.resolve(m.path));
+    const inSandbox = resolved.startsWith(path.resolve(sandboxDir));
+    // Also allow writes inside the project working folder (local folder mode)
+    const projectFolder = getCurrentProjectWorkingFolder();
+    const inProjectFolder = projectFolder && path.isAbsolute(projectFolder) && (resolved.startsWith(path.resolve(projectFolder) + path.sep) || resolved === path.resolve(projectFolder));
+    if (!inMount && !inSandbox && !inProjectFolder) {
+      return { ok: false, error: "Write denied: absolute path is not inside a writable local mount, sandbox, or project working folder." };
+    }
+    target = resolved;
+  } else {
+    const outputDir = getCurrentProjectWorkingFolder() || path.join(sandboxDir, "output_file");
+    fs.mkdirSync(outputDir, { recursive: true });
+    target = path.resolve(outputDir, args.path);
+  }
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (args.append) {
     fs.appendFileSync(target, args.content, "utf8");
@@ -1176,9 +1232,45 @@ async function writeFileTool(args: { path: string; content: string; append?: boo
   return { ok: true, path: target, bytes: Buffer.byteLength(args.content), outputFiles };
 }
 
+async function deleteFileTool(args: { path: string }): Promise<any> {
+  if (!args.path) return { ok: false, error: "No path provided" };
+  const settings = await getSettings();
+  const sandboxDir = resolveSandboxDir(settings.sandboxDir);
+
+  let target: string;
+  if (path.isAbsolute(args.path)) {
+    const mounts = (settings.localFileMounts || []).filter((m: any) => m.enabled && m.permissions === "readwrite");
+    const resolved = path.resolve(args.path);
+    const inMount = mounts.some((m: any) => resolved.startsWith(path.resolve(m.path) + path.sep) || resolved === path.resolve(m.path));
+    const inSandbox = resolved.startsWith(path.resolve(sandboxDir));
+    const projectFolder = getCurrentProjectWorkingFolder();
+    const inProjectFolder = projectFolder && path.isAbsolute(projectFolder) && (resolved.startsWith(path.resolve(projectFolder) + path.sep) || resolved === path.resolve(projectFolder));
+    if (!inMount && !inSandbox && !inProjectFolder) {
+      return { ok: false, error: "Delete denied: absolute path is not inside a writable local mount, sandbox, or project working folder." };
+    }
+    target = resolved;
+  } else {
+    const projectFolder = getCurrentProjectWorkingFolder();
+    const baseDir = projectFolder || sandboxDir;
+    target = path.resolve(baseDir, args.path);
+  }
+
+  if (!fs.existsSync(target)) return { ok: false, error: "File not found: " + target };
+  const stat = fs.statSync(target);
+  if (stat.isDirectory()) {
+    fs.rmSync(target, { recursive: true, force: true });
+  } else {
+    fs.unlinkSync(target);
+  }
+  return { ok: true, deleted: target };
+}
+
 async function listFilesTool(args: { path?: string; recursive?: boolean }): Promise<any> {
   const settings = await getSettings();
-  const target = path.resolve(args.path || resolveSandboxDir(settings.sandboxDir));
+  // Default to project working folder if available, otherwise sandbox
+  const projectFolder = getCurrentProjectWorkingFolder();
+  const defaultDir = (projectFolder && fs.existsSync(projectFolder)) ? projectFolder : resolveSandboxDir(settings.sandboxDir);
+  const target = path.resolve(args.path || defaultDir);
   if (!fs.existsSync(target)) return { ok: false, error: "Directory not found" };
   const items: { path: string; type: string }[] = [];
   const limit = 200;
@@ -1196,6 +1288,22 @@ async function listFilesTool(args: { path?: string; recursive?: boolean }): Prom
   }
   walk(target);
   return { root: target, items, truncated: items.length >= limit };
+}
+
+async function listLocalMountsTool(): Promise<any> {
+  const settings = await getSettings();
+  const mounts = (settings.localFileMounts || []).filter((m: any) => m.enabled);
+  if (mounts.length === 0) return { ok: true, mounts: [], message: "No local directories are mounted. The user can add mounts in Settings > Local Files." };
+  return {
+    ok: true,
+    mounts: mounts.map((m: any) => ({
+      id: m.id,
+      label: m.label,
+      path: m.path,
+      permissions: m.permissions,
+    })),
+    instructions: "Use read_file, write_file, delete_file, and list_files with the absolute paths above to access these directories. You can also use run_python (with absolute paths in your code, e.g. open('/path/to/file')) and run_shell (pass the mount path as cwd) to work directly in these directories. For binary files (PDF, images, etc.), use list_files to find them, then tell the user to view them in the Local Files browser.",
+  };
 }
 
 const SKILLS_DIR = path.resolve("Tiger_bot/skills");
@@ -1454,7 +1562,7 @@ interface AgentConfig {
   responsibilities: string[];
   constraints?: string[];
   tools_allowed?: string[];
-  type?: "remote";              // remote = delegate to another Tiger Cowork instance
+  type?: "remote";              // remote = delegate to another TigrimOS instance
   remote_instance?: string;     // references a saved Remote Instance id/name in settings
   remote_url?: string;          // inline URL fallback (no saved instance needed)
   remote_token?: string;        // inline token fallback
@@ -2161,7 +2269,7 @@ export async function spawnSubagent(
     resolvedSystemConfig = systemConfig;
 
     if (agentDef && agentDef.type === "remote") {
-      // ─── Remote agent: delegate to another Tiger Cowork instance ───
+      // ─── Remote agent: delegate to another TigrimOS instance ───
       console.log(`[SubAgent:${label}] Remote agent — delegating to remote instance`);
       let instance: RemoteInstance | undefined;
       if (agentDef.remote_instance && settings.remoteInstances) {
@@ -2699,7 +2807,7 @@ async function realtimeAgentLoop(
   // Build tool set: builtin tools + protocol tools
   // Orchestrator agents should DELEGATE work, not do research themselves.
   // Only give orchestrators file I/O, code execution, and skill tools — remove web_search, fetch_url, etc.
-  const orchestratorOnlyTools = ["write_file", "read_file", "list_files", "run_python", "run_react", "list_skills", "load_skill"];
+  const orchestratorOnlyTools = ["write_file", "read_file", "list_files", "list_local_mounts", "run_python", "run_react", "list_skills", "load_skill"];
   const isOrchRole = agentDef.role === "orchestrator";
   const agentTools: any[] = isOrchRole
     ? builtinTools.filter((t: any) => orchestratorOnlyTools.includes(t.function?.name || ""))
@@ -3951,6 +4059,8 @@ async function callToolImpl(name: string, args: any, signal?: AbortSignal, taskI
     case "read_file": return readFileTool(args);
     case "write_file": return writeFileTool(args);
     case "list_files": return listFilesTool(args);
+    case "delete_file": return deleteFileTool(args);
+    case "list_local_mounts": return listLocalMountsTool();
     case "list_skills": return listSkillsTool();
     case "load_skill": return loadSkillTool(args);
     case "clawhub_search": return clawhubSearchTool(args);

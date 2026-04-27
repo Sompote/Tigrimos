@@ -11,12 +11,13 @@ interface Skill {
   script: string;
   enabled?: boolean;
   installedAt?: string;
+  reviewStatus?: "pending" | "approved";
 }
 
 export default function SkillsPage() {
   const [installed, setInstalled] = useState<Skill[]>([]);
   const [catalog, setCatalog] = useState<Skill[]>([]);
-  const [tab, setTab] = useState<"installed" | "catalog" | "clawhub" | "custom">("installed");
+  const [tab, setTab] = useState<"installed" | "auto" | "catalog" | "clawhub" | "custom">("installed");
   const [customForm, setCustomForm] = useState({ name: "", description: "", script: "" });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPreview, setUploadPreview] = useState<{ name: string; description: string; body: string } | null>(null);
@@ -29,11 +30,85 @@ export default function SkillsPage() {
   const [detailSlug, setDetailSlug] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<{ content: string; meta: any; installed: boolean } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Auto-generate skill state
+  const [autoStatus, setAutoStatus] = useState<any>(null);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoResult, setAutoResult] = useState<any>(null);
+  const [diffSkillId, setDiffSkillId] = useState<string | null>(null);
+  const [diffData, setDiffData] = useState<{ current?: string; proposed?: string } | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [viewSkillId, setViewSkillId] = useState<string | null>(null);
+  const [viewContent, setViewContent] = useState<string | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
 
   useEffect(() => {
     api.getSkills().then(setInstalled);
     api.getSkillCatalog().then(setCatalog);
+    api.skillAutoStatus().then(setAutoStatus).catch(() => {});
   }, []);
+
+  const runAutoNow = async () => {
+    setAutoRunning(true);
+    setAutoResult(null);
+    try {
+      const result = await api.skillAutoRunNow();
+      setAutoResult(result);
+      api.getSkills().then(setInstalled);
+      api.skillAutoStatus().then(setAutoStatus).catch(() => {});
+    } catch (err: any) {
+      setAutoResult({ ok: false, error: err.message });
+    }
+    setAutoRunning(false);
+  };
+
+  const handleApprove = async (id: string) => {
+    const res = await api.skillApprove(id);
+    if (res.ok) {
+      api.getSkills().then(setInstalled);
+      setDiffSkillId(null);
+      setDiffData(null);
+    } else {
+      alert(res.error || "Approve failed");
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    if (!confirm("Reject and discard this proposed skill?")) return;
+    const res = await api.skillReject(id);
+    if (res.ok) {
+      api.getSkills().then(setInstalled);
+      setDiffSkillId(null);
+      setDiffData(null);
+    } else {
+      alert(res.error || "Reject failed");
+    }
+  };
+
+  const viewSkillContent = async (id: string) => {
+    if (viewSkillId === id) { setViewSkillId(null); setViewContent(null); return; }
+    setViewSkillId(id);
+    setViewLoading(true);
+    try {
+      const res = await api.skillContent(id);
+      setViewContent(res.ok ? res.content : res.error || "Could not load");
+    } catch { setViewContent("Failed to load skill content"); }
+    setViewLoading(false);
+  };
+
+  const downloadSkill = (id: string) => {
+    window.open(api.skillDownloadUrl(id), "_blank");
+  };
+
+  const viewDiff = async (id: string) => {
+    if (diffSkillId === id) { setDiffSkillId(null); setDiffData(null); return; }
+    setDiffSkillId(id);
+    setDiffLoading(true);
+    try {
+      const res = await api.skillProposedDiff(id);
+      setDiffData(res.ok ? { current: res.current, proposed: res.proposed } : null);
+    } catch { setDiffData(null); }
+    setDiffLoading(false);
+  };
 
   const searchClawhub = async () => {
     if (!clawhubQuery.trim()) return;
@@ -229,9 +304,13 @@ export default function SkillsPage() {
       <div className="page-header">
         <h1>Skills</h1>
         <div className="tab-bar">
-          {(["installed", "catalog", "clawhub", "custom"] as const).map((t) => (
-            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-              {t === "installed" ? `Installed (${installed.length})` : t === "catalog" ? "Built-in" : t === "clawhub" ? "Clawhub" : "Custom Skill"}
+          {(["installed", "auto", "catalog", "clawhub", "custom"] as const).map((t) => (
+            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t as any)}>
+              {t === "installed" ? `Installed (${installed.length})`
+                : t === "auto" ? `Auto${installed.filter(s => s.reviewStatus === "pending").length > 0 ? ` (${installed.filter(s => s.reviewStatus === "pending").length})` : ""}`
+                : t === "catalog" ? "Built-in"
+                : t === "clawhub" ? "Clawhub"
+                : "Custom Skill"}
             </button>
           ))}
         </div>
@@ -245,21 +324,274 @@ export default function SkillsPage() {
                 <div className="card-title-row">
                   <h3>{skill.name}</h3>
                   <span className={`source-badge ${skill.source}`}>{skill.source}</span>
-                  <span className={`status-badge ${skill.enabled ? "active" : "inactive"}`}>
-                    {skill.enabled ? "Enabled" : "Disabled"}
-                  </span>
+                  {skill.reviewStatus === "pending" ? (
+                    <span className="status-badge" style={{ background: "#fef7e0", color: "#ea8600" }}>Pending</span>
+                  ) : (
+                    <span className={`status-badge ${skill.enabled ? "active" : "inactive"}`}>
+                      {skill.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                  )}
                 </div>
                 <div className="card-actions">
-                  <button className="btn btn-ghost btn-sm" onClick={() => toggleSkill(skill)}>
-                    {skill.enabled ? "Disable" : "Enable"}
+                  <button className="btn btn-ghost btn-sm" onClick={() => viewSkillContent(skill.id!)}>
+                    {viewSkillId === skill.id ? "Hide" : "View"}
                   </button>
-                  <button className="btn btn-danger btn-sm" onClick={() => uninstallSkill(skill.id!)}>Uninstall</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => downloadSkill(skill.id!)}>Download</button>
+                  {skill.reviewStatus === "pending" ? (
+                    <>
+                      <button className="btn btn-ghost btn-sm" onClick={() => viewDiff(skill.id!)}>Diff</button>
+                      <button className="btn btn-primary btn-sm" onClick={() => handleApprove(skill.id!)}>Approve</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleReject(skill.id!)}>Reject</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn btn-ghost btn-sm" onClick={() => toggleSkill(skill)}>
+                        {skill.enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button className="btn btn-danger btn-sm" onClick={() => uninstallSkill(skill.id!)}>Uninstall</button>
+                    </>
+                  )}
                 </div>
               </div>
               <p className="card-desc">{skill.description}</p>
+              {viewSkillId === skill.id && (
+                <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                  {viewLoading ? (
+                    <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>Loading...</div>
+                  ) : viewContent ? (() => {
+                    const { fm, body } = parseFrontmatter(viewContent);
+                    return (
+                      <div style={{ fontSize: 12 }}>
+                        {Object.keys(fm).length > 0 && (
+                          <div style={{
+                            display: "flex", flexWrap: "wrap", gap: 8, padding: "8px 12px",
+                            background: "var(--bg-secondary, #f8f9fa)", borderBottom: "1px solid var(--border)",
+                          }}>
+                            {Object.entries(fm).map(([k, v]) => (
+                              <span key={k}><strong style={{ opacity: 0.5, marginRight: 4 }}>{k}:</strong>{v}</span>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ padding: 12, maxHeight: 400, overflow: "auto", lineHeight: 1.6 }}
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+                        />
+                      </div>
+                    );
+                  })() : (
+                    <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>No content available</div>
+                  )}
+                </div>
+              )}
+              {diffSkillId === skill.id && (
+                <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                  {diffLoading ? (
+                    <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>Loading diff...</div>
+                  ) : diffData ? (
+                    <div style={{ display: "flex", gap: 0, fontSize: 12 }}>
+                      <div style={{ flex: 1, padding: 10, background: "rgba(255,0,0,0.03)", borderRight: "1px solid var(--border)", overflow: "auto", maxHeight: 300 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 6, opacity: 0.6 }}>Current</div>
+                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{diffData.current || "(new skill)"}</pre>
+                      </div>
+                      <div style={{ flex: 1, padding: 10, background: "rgba(0,255,0,0.03)", overflow: "auto", maxHeight: 300 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 6, opacity: 0.6 }}>Proposed</div>
+                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{diffData.proposed || "(none)"}</pre>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>No diff data available</div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
           {installed.length === 0 && <div className="empty-state-full"><p>No skills installed</p><p className="hint">Browse the catalog to install skills</p></div>}
+        </div>
+      )}
+
+      {tab === "auto" && (
+        <div className="card form-card">
+          <h3>Automatic Skill Generation</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            The synthesiser analyses your recent chat sessions and proposes reusable SKILL.md workflows.
+            Skills are distilled from successful conversations so future chats can match stored procedures.
+          </p>
+
+          {/* Status */}
+          {autoStatus && (
+            <div style={{ marginBottom: 16, padding: "10px 14px", background: "var(--bg-secondary, #f8f9fa)", borderRadius: 6, fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <span><strong>Status:</strong> {autoStatus.enabled ? "Enabled" : "Disabled"}</span>
+                <span><strong>Interval:</strong> {autoStatus.intervalMinutes} min</span>
+                <span><strong>Approval:</strong> {autoStatus.requireApproval ? "Required" : "Auto-approve"}</span>
+              </div>
+              {autoStatus.lastRunAt && (
+                <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>
+                  Last run: {new Date(autoStatus.lastRunAt).toLocaleString()} — {autoStatus.lastRunSummary || "No summary"}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Run Now button */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+            <button className="btn btn-primary" onClick={runAutoNow} disabled={autoRunning}>
+              {autoRunning ? "Running..." : "Run Auto-Update Now"}
+            </button>
+            {autoResult && (
+              <span style={{ fontSize: 12, color: autoResult.ok ? "#137333" : "#c5221f" }}>
+                {autoResult.ok ? autoResult.summary : (autoResult.error || "Failed")}
+              </span>
+            )}
+          </div>
+
+          {/* Pending skills */}
+          {(() => {
+            const pendingSkills = installed.filter(s => s.reviewStatus === "pending");
+            if (pendingSkills.length === 0) return (
+              <div style={{ padding: "20px 0", textAlign: "center", opacity: 0.5 }}>
+                No pending proposals. Run auto-update to analyse recent chats.
+              </div>
+            );
+            return (
+              <div>
+                <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Pending Proposals ({pendingSkills.length})</h4>
+                {pendingSkills.map(skill => (
+                  <div key={skill.id} className="card" style={{ marginBottom: 8 }}>
+                    <div className="card-header">
+                      <div className="card-title-row">
+                        <h3>{skill.name}</h3>
+                        <span className="source-badge auto">auto</span>
+                        <span className="status-badge" style={{ background: "#fef7e0", color: "#ea8600" }}>Pending</span>
+                      </div>
+                      <div className="card-actions">
+                        <button className="btn btn-ghost btn-sm" onClick={() => viewSkillContent(skill.id!)}>
+                          {viewSkillId === skill.id ? "Hide" : "View"}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => downloadSkill(skill.id!)}>Download</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => viewDiff(skill.id!)}>
+                          {diffSkillId === skill.id ? "Hide Diff" : "Diff"}
+                        </button>
+                        <button className="btn btn-primary btn-sm" onClick={() => handleApprove(skill.id!)}>Approve</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleReject(skill.id!)}>Reject</button>
+                      </div>
+                    </div>
+                    <p className="card-desc">{skill.description}</p>
+                    {viewSkillId === skill.id && (
+                      <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                        {viewLoading ? (
+                          <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>Loading...</div>
+                        ) : viewContent ? (() => {
+                          const { fm, body } = parseFrontmatter(viewContent);
+                          return (
+                            <div style={{ fontSize: 12 }}>
+                              {Object.keys(fm).length > 0 && (
+                                <div style={{
+                                  display: "flex", flexWrap: "wrap", gap: 8, padding: "8px 12px",
+                                  background: "var(--bg-secondary, #f8f9fa)", borderBottom: "1px solid var(--border)",
+                                }}>
+                                  {Object.entries(fm).map(([k, v]) => (
+                                    <span key={k}><strong style={{ opacity: 0.5, marginRight: 4 }}>{k}:</strong>{v}</span>
+                                  ))}
+                                </div>
+                              )}
+                              <div style={{ padding: 12, maxHeight: 400, overflow: "auto", lineHeight: 1.6 }}
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+                              />
+                            </div>
+                          );
+                        })() : (
+                          <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>No content available</div>
+                        )}
+                      </div>
+                    )}
+                    {diffSkillId === skill.id && (
+                      <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                        {diffLoading ? (
+                          <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>Loading diff...</div>
+                        ) : diffData ? (
+                          <div style={{ display: "flex", gap: 0, fontSize: 12 }}>
+                            <div style={{ flex: 1, padding: 10, background: "rgba(255,0,0,0.03)", borderRight: "1px solid var(--border)", overflow: "auto", maxHeight: 300 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6, opacity: 0.6 }}>Current</div>
+                              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{diffData.current || "(new skill — no existing file)"}</pre>
+                            </div>
+                            <div style={{ flex: 1, padding: 10, background: "rgba(0,255,0,0.03)", overflow: "auto", maxHeight: 300 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6, opacity: 0.6 }}>Proposed</div>
+                              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{diffData.proposed || "(none)"}</pre>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>No diff data available</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Auto-generated skills (approved/active) */}
+          {(() => {
+            const autoSkills = installed.filter(s => s.source === "auto" && s.reviewStatus !== "pending");
+            if (autoSkills.length === 0) return null;
+            return (
+              <div style={{ marginTop: 16 }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Auto-Generated Skills ({autoSkills.length})</h4>
+                {autoSkills.map(skill => (
+                  <div key={skill.id} className="card" style={{ marginBottom: 8 }}>
+                    <div className="card-header">
+                      <div className="card-title-row">
+                        <h3>{skill.name}</h3>
+                        <span className="source-badge auto">auto</span>
+                        <span className={`status-badge ${skill.enabled ? "active" : "inactive"}`}>
+                          {skill.enabled ? "Enabled" : "Disabled"}
+                        </span>
+                      </div>
+                      <div className="card-actions">
+                        <button className="btn btn-ghost btn-sm" onClick={() => viewSkillContent(skill.id!)}>
+                          {viewSkillId === skill.id ? "Hide" : "View"}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => downloadSkill(skill.id!)}>Download</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => toggleSkill(skill)}>
+                          {skill.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={() => uninstallSkill(skill.id!)}>Uninstall</button>
+                      </div>
+                    </div>
+                    <p className="card-desc">{skill.description}</p>
+                    {viewSkillId === skill.id && (
+                      <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                        {viewLoading ? (
+                          <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>Loading...</div>
+                        ) : viewContent ? (() => {
+                          const { fm, body } = parseFrontmatter(viewContent);
+                          return (
+                            <div style={{ fontSize: 12 }}>
+                              {Object.keys(fm).length > 0 && (
+                                <div style={{
+                                  display: "flex", flexWrap: "wrap", gap: 8, padding: "8px 12px",
+                                  background: "var(--bg-secondary, #f8f9fa)", borderBottom: "1px solid var(--border)",
+                                }}>
+                                  {Object.entries(fm).map(([k, v]) => (
+                                    <span key={k}><strong style={{ opacity: 0.5, marginRight: 4 }}>{k}:</strong>{v}</span>
+                                  ))}
+                                </div>
+                              )}
+                              <div style={{ padding: 12, maxHeight: 400, overflow: "auto", lineHeight: 1.6 }}
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+                              />
+                            </div>
+                          );
+                        })() : (
+                          <div style={{ padding: 16, textAlign: "center", opacity: 0.6 }}>No content available</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -140,6 +140,23 @@ export function killActiveTask(taskId: string): boolean {
   return false;
 }
 
+async function getLocalMountsPrompt(): Promise<string> {
+  try {
+    const settings = await getSettings();
+    const mounts = (settings.localFileMounts || []).filter((m: any) => m.enabled);
+    if (mounts.length === 0) return "";
+    let block = "\n\n=== HOST FOLDERS (mounted from outside sandbox) ===";
+    block += "\nThese folders are shared from the host machine. Use ABSOLUTE paths with read_file, write_file, list_files, delete_file, run_python, and run_shell.";
+    for (const m of mounts) {
+      block += `\n- "${m.label}" → ${m.path} [${m.permissions === "readwrite" ? "read & write" : "read only"}]`;
+    }
+    block += "\nTo work in a host folder with run_python, use absolute paths (e.g. open('" + mounts[0].path + "/file.txt')). For run_shell, pass the mount path as cwd.";
+    return block;
+  } catch {
+    return "";
+  }
+}
+
 export async function buildSystemPrompt(filterSkillIds?: string[], options?: { includeAgentConfig?: boolean }): Promise<string> {
   // Gather installed clawhub skills
   const clawhubDir = path.resolve("Tiger_bot/skills");
@@ -301,7 +318,7 @@ Output files:
 - Save charts as .png (plt.savefig, never plt.show). Save reports as .html or .pdf. Use python-docx for .docx files (never write_file for binary formats).
 - Generate actual output files — don't just print data. Combine data processing and chart generation in one run_python call when possible.
 - For interactive visualizations, use run_react. Globals (React, hooks, Recharts components) are pre-loaded — do not use import/export statements.
-- MCP tools (prefixed "mcp_") are available when connected via Settings.${skillsList}${includeAgents ? (await getManualAgentConfigSummary() || "") : ""}`;
+- MCP tools (prefixed "mcp_") are available when connected via Settings.${await getLocalMountsPrompt()}${skillsList}${includeAgents ? (await getManualAgentConfigSummary() || "") : ""}`;
 }
 
 // Store io reference for broadcasting status to all connected clients
@@ -1417,12 +1434,19 @@ img.save('${tmpOut}', 'JPEG', quality=80)
       let resolvedWorkingFolder = project.workingFolder
         ? (path.isAbsolute(project.workingFolder) ? project.workingFolder : path.join(sandboxDir_proj, project.workingFolder))
         : "";
-      // If absolute working folder doesn't exist (e.g. /root/cowork/ from old setup),
-      // fall back to sandbox-relative using the folder's basename
+      // If working folder doesn't exist: for absolute local paths, try to create it;
+      // for old/unreachable paths, fall back to sandbox-relative
       if (resolvedWorkingFolder && !fs.existsSync(resolvedWorkingFolder)) {
-        const fallback = path.join(sandboxDir_proj, path.basename(resolvedWorkingFolder));
-        try { fs.mkdirSync(fallback, { recursive: true }); } catch {}
-        resolvedWorkingFolder = fallback;
+        if (path.isAbsolute(project.workingFolder)) {
+          // Local folder mode — create the directory on the host
+          try { fs.mkdirSync(resolvedWorkingFolder, { recursive: true }); } catch {}
+        }
+        // If still doesn't exist (permissions, etc.), fall back to sandbox
+        if (!fs.existsSync(resolvedWorkingFolder)) {
+          const fallback = path.join(sandboxDir_proj, path.basename(resolvedWorkingFolder));
+          try { fs.mkdirSync(fallback, { recursive: true }); } catch {}
+          resolvedWorkingFolder = fallback;
+        }
       }
 
       // Build project-aware system prompt (filter skills to only project-selected ones)
@@ -1437,6 +1461,29 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         project.skills && project.skills.length > 0 ? project.skills : undefined,
         { includeAgentConfig: projHasRealtime }
       );
+
+      // Inject custom system prompt if set
+      if ((project as any).systemPrompt) {
+        projectPrompt += `\n\n--- PROJECT SYSTEM PROMPT ---\n${(project as any).systemPrompt}\n--- END PROJECT SYSTEM PROMPT ---`;
+      }
+
+      // Read tiger.md (project instruction file, like CLAUDE.md) from working folder
+      let tigerMdContent = "";
+      if (resolvedWorkingFolder) {
+        const tigerMdPath = path.join(resolvedWorkingFolder, "tiger.md");
+        try {
+          if (fs.existsSync(tigerMdPath)) {
+            tigerMdContent = fs.readFileSync(tigerMdPath, "utf-8");
+          }
+        } catch (err: any) {
+          console.error(`Failed to read tiger.md for project ${project.id}:`, err.message);
+        }
+      }
+
+      // Inject tiger.md instructions
+      if (tigerMdContent) {
+        projectPrompt += `\n\n--- PROJECT INSTRUCTIONS (tiger.md) ---\nThe following are project-level instructions from tiger.md. Follow these guidelines when working on this project:\n\n${tigerMdContent}\n--- END PROJECT INSTRUCTIONS ---`;
+      }
 
       // Read project memory fresh from {workingFolder}/memory.md every time
       let projectMemory = "";
@@ -1467,7 +1514,18 @@ img.save('${tmpOut}', 'JPEG', quality=80)
 
       // Inject working folder info
       if (resolvedWorkingFolder) {
-        projectPrompt += `\n\nProject working folder: ${resolvedWorkingFolder}\nWhen the user asks about files, search this folder first. Use this folder for reading/writing project files.\nIMPORTANT: All output files (charts, reports, documents, etc.) are saved directly to this project working folder. The Python working directory (os.chdir) is set to this folder. PROJECT_DIR also points to this folder.`;
+        const isLocalFolder = path.isAbsolute(project.workingFolder);
+        if (isLocalFolder) {
+          projectPrompt += `\n\nProject working folder: ${resolvedWorkingFolder} (LOCAL FOLDER on the host machine)
+You are working DIRECTLY on the user's local file system at this path. This is NOT a sandbox — changes affect real files on the user's Mac.
+- run_python: CWD is set to this folder. PROJECT_DIR also points here. Files you create appear in this folder.
+- run_shell: Commands execute in this folder by default. You can run git, npm, etc. directly.
+- read_file / write_file / list_files: Relative paths resolve against this folder.
+- You have full access to all files in this directory tree.
+When the user asks about files, search this folder first.`;
+        } else {
+          projectPrompt += `\n\nProject working folder: ${resolvedWorkingFolder}\nWhen the user asks about files, search this folder first. Use this folder for reading/writing project files.\nIMPORTANT: All output files (charts, reports, documents, etc.) are saved directly to this project working folder. The Python working directory (os.chdir) is set to this folder. PROJECT_DIR also points to this folder.`;
+        }
       }
 
       // Inject selected skills info

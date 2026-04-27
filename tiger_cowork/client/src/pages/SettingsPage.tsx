@@ -58,6 +58,8 @@ export default function SettingsPage() {
   const [remoteTestResults, setRemoteTestResults] = useState<Record<string, { ok: boolean; message: string } | null>>({});
   const [remoteTesting, setRemoteTesting] = useState<string | null>(null);
 
+  // Local File Mounts
+
   useEffect(() => {
     api.getSettings().then(setSettings);
     api.mcpStatus().then(setMcpStatuses).catch(() => {});
@@ -306,6 +308,7 @@ export default function SettingsPage() {
                     minimax: { url: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
                     google_ai_studio: { url: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-3-flash-preview" },
                     kimi: { url: "https://api.kimi.com/coding/v1", model: "kimi-k2-0905-preview" },
+                    deepseek: { url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
                   };
                   // Check custom providers for defaults
                   const customProviders: Array<{ id: string; name: string; url: string; model: string }> = settings.customProviders || [];
@@ -324,13 +327,14 @@ export default function SettingsPage() {
                 <option value="minimax">MiniMax</option>
                 <option value="google_ai_studio">Google AI Studio</option>
                 <option value="kimi">Kimi (Moonshot)</option>
+                <option value="deepseek">DeepSeek</option>
                 {(settings.customProviders || []).map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
               <button className="btn btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => setShowAddProvider(true)}>+ Add</button>
               {/* Show remove button only for custom providers */}
-              {!(["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "kimi"].includes(settings.aiProvider || "openrouter")) && (
+              {!(["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "kimi", "deepseek"].includes(settings.aiProvider || "openrouter")) && (
                 <button className="btn btn-danger" style={{ whiteSpace: "nowrap" }} onClick={() => {
                   if (!confirm(`Remove provider "${(settings.customProviders || []).find((p: any) => p.id === settings.aiProvider)?.name || settings.aiProvider}"?`)) return;
                   const customProviders = (settings.customProviders || []).filter((p: any) => p.id !== settings.aiProvider);
@@ -366,7 +370,7 @@ export default function SettingsPage() {
                   if (!newProviderName.trim()) return;
                   const id = newProviderName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
                   const customProviders = [...(settings.customProviders || [])];
-                  if (customProviders.some((p: any) => p.id === id) || ["openrouter", "zai", "anthropic_claude_code"].includes(id)) return;
+                  if (customProviders.some((p: any) => p.id === id) || ["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "kimi", "deepseek"].includes(id)) return;
                   customProviders.push({ id, name: newProviderName.trim(), url: newProviderUrl.trim(), model: newProviderModel.trim() });
                   // Switch to the new provider immediately
                   const s: any = { ...settings, customProviders };
@@ -1085,7 +1089,7 @@ export default function SettingsPage() {
             </label>
           </h3>
           <p className="hint" style={{ marginBottom: 12 }}>
-            Allow this instance to accept peer-to-peer connections from other Tiger CoWork machines. When disabled, remote token authentication is rejected and the remote menu is hidden.
+            Allow this instance to accept peer-to-peer connections from other TigrimOS machines. When disabled, remote token authentication is rejected and the remote menu is hidden.
           </p>
         </section>
 
@@ -1170,7 +1174,7 @@ export default function SettingsPage() {
         <section className="card">
           <h3>Remote Instances</h3>
           <p className="hint" style={{ marginBottom: 12 }}>
-            Delegate tasks to Tiger Cowork running on other machines. Both machines run the same codebase — either can be orchestrator or worker.
+            Delegate tasks to TigrimOS running on other machines. Both machines run the same codebase — either can be orchestrator or worker.
           </p>
 
           {/* Existing instances */}
@@ -1253,6 +1257,16 @@ export default function SettingsPage() {
             Instances are saved when you click "Save Settings". Use the Test button after saving to verify connectivity.
           </p>
         </section></>)}
+
+        <SkillAutoUpdateSection settings={settings} setSettings={setSettings} />
+
+        <section className="card">
+          <h3>Host Folders</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Browse and edit files on your host machine via shared folders. Go to <strong>Files &rarr; Host Folders</strong> to manage mounts.
+            VM shared folders (UTM/VirtFS) are auto-detected. The AI agent is aware of all connected host folders.
+          </p>
+        </section>
 
         <section className="card">
           <h3>MCP Servers</h3>
@@ -1367,6 +1381,142 @@ export default function SettingsPage() {
           />
         </Suspense>
       )}
+
+      <section className="card" style={{ marginTop: 24 }}>
+        <h3>About TigrimOS</h3>
+        <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+          <div><strong>Version:</strong> 1.4.0</div>
+          <div><strong>Build:</strong> 5</div>
+          <div style={{ marginTop: 8, opacity: 0.7, fontSize: 12 }}>
+            Copyright &copy; 2024 Tiger Cowork. All rights reserved.
+          </div>
+        </div>
+      </section>
     </div>
+  );
+}
+
+function SkillAutoUpdateSection({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
+  const [running, setRunning] = useState(false);
+  const [lastRun, setLastRun] = useState<string | null>(null);
+
+  const enabled = !!settings.skillAutoUpdateEnabled;
+  const interval = settings.skillAutoUpdateIntervalMinutes ?? 60;
+  const maxCandidates = settings.skillAutoUpdateMaxCandidates ?? 30;
+  const requireApproval = settings.skillAutoUpdateRequireApproval !== false;
+  const humanFeedback = !!settings.skillAutoUpdateHumanFeedbackEnabled;
+
+  const runNow = async () => {
+    setRunning(true);
+    try {
+      const res = await api.skillAutoRunNow();
+      if (res?.ok) {
+        setLastRun(`created=${res.created} updated=${res.updated} skipped=${res.skipped}`);
+      } else {
+        setLastRun(`error: ${res?.error || "unknown"}`);
+      }
+      try {
+        const s = await api.getSettings();
+        setSettings(s);
+      } catch {}
+    } catch (err: any) {
+      setLastRun(`error: ${err.message}`);
+    }
+    setRunning(false);
+  };
+
+  return (
+    <section className="card">
+      <h3>Skill Auto-Update Loop</h3>
+      <p className="hint" style={{ marginBottom: 12 }}>
+        Periodically scan recent successful chats and let the AI synthesise a new skill or propose an update to an existing auto-generated skill. Inspired by the hermes-agent skill loop. Save settings to take effect.
+      </p>
+      <div className="form-group">
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setSettings({ ...settings, skillAutoUpdateEnabled: e.target.checked })}
+          />
+          <span>Enable auto-update skill loop</span>
+        </label>
+      </div>
+      {enabled && (
+        <>
+          <div className="form-group">
+            <label>Interval (minutes)</label>
+            <input
+              type="number"
+              value={interval}
+              min={5}
+              max={1440}
+              step={5}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  skillAutoUpdateIntervalMinutes: Math.min(1440, Math.max(5, parseInt(e.target.value) || 60)),
+                })
+              }
+            />
+            <p className="hint">How often the loop wakes up to inspect recent successful chats (min 5, max 1440).</p>
+          </div>
+          <div className="form-group">
+            <label>Max candidates per run</label>
+            <input
+              type="number"
+              value={maxCandidates}
+              min={1}
+              max={200}
+              step={1}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  skillAutoUpdateMaxCandidates: Math.min(200, Math.max(1, parseInt(e.target.value) || 30)),
+                })
+              }
+            />
+            <p className="hint">Most recent N successful sessions considered each tick (default 30).</p>
+          </div>
+          <div className="form-group">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={requireApproval}
+                onChange={(e) => setSettings({ ...settings, skillAutoUpdateRequireApproval: e.target.checked })}
+              />
+              <span>Require approval before activating new skills (recommended)</span>
+            </label>
+            <p className="hint">When on, AI-written skills land as drafts. Review them in the Skills &rarr; Auto-Generated tab.</p>
+          </div>
+          <div className="form-group">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={humanFeedback}
+                onChange={(e) => setSettings({ ...settings, skillAutoUpdateHumanFeedbackEnabled: e.target.checked })}
+              />
+              <span>Collect human feedback on assistant responses</span>
+            </label>
+            <p className="hint">Adds thumbs-up / thumbs-down / comment buttons above each assistant message in the chat. Ratings and comments are recorded on the session and fed into the skill synthesiser so liked answers reinforce skills and disliked ones get corrected.</p>
+          </div>
+
+          <div className="form-group">
+            <label>Last run</label>
+            <div style={{ fontSize: 13, opacity: 0.85 }}>
+              {settings.skillAutoUpdateLastRunAt
+                ? `${new Date(settings.skillAutoUpdateLastRunAt).toLocaleString()} — ${settings.skillAutoUpdateLastRunSummary || "(no summary)"}`
+                : "(never)"}
+              {lastRun && <div style={{ marginTop: 4, opacity: 0.85 }}>This session: {lastRun}</div>}
+            </div>
+          </div>
+
+          <div className="form-actions">
+            <button className="btn btn-ghost btn-sm" onClick={runNow} disabled={running}>
+              {running ? "Running..." : "Run now"}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }

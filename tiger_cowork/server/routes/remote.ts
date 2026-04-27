@@ -1,5 +1,5 @@
 /**
- * Remote Task Routes — handle incoming tasks from other Tiger CoWork instances.
+ * Remote Task Routes — handle incoming tasks from other TigrimOS instances.
  *
  * When remoteAgentConfig is set, incoming tasks are processed through the
  * realtime agent system (swarm). Otherwise, they fall back to simple chat.

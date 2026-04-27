@@ -31,12 +31,17 @@ async function resolveWorkingFolder(project: Project): Promise<string> {
     resolved = path.join(sandboxDir, project.workingFolder);
   }
 
-  // Fallback: if absolute path doesn't exist (e.g. /root/cowork/ from old setup),
-  // use basename under sandboxDir
+  // If path doesn't exist: for absolute local paths, try to create it;
+  // for old/unreachable paths, fall back to sandbox-relative
   if (!fs.existsSync(resolved)) {
-    const fallback = path.join(sandboxDir, path.basename(resolved));
-    try { fs.mkdirSync(fallback, { recursive: true }); } catch {}
-    resolved = fallback;
+    if (path.isAbsolute(project.workingFolder)) {
+      try { fs.mkdirSync(resolved, { recursive: true }); } catch {}
+    }
+    if (!fs.existsSync(resolved)) {
+      const fallback = path.join(sandboxDir, path.basename(resolved));
+      try { fs.mkdirSync(fallback, { recursive: true }); } catch {}
+      resolved = fallback;
+    }
   }
 
   return resolved;
@@ -109,8 +114,17 @@ export async function projectsRoutes(fastify: FastifyInstance) {
     // Remove legacy fields if present
     delete updates.folderLocation;
     delete updates.folderAccess;
+    // Resolve relative working folder paths
+    if (updates.workingFolder && !path.isAbsolute(updates.workingFolder)) {
+      const settings = await getSettings();
+      updates.workingFolder = path.join(resolveSandboxDir(settings.sandboxDir), updates.workingFolder);
+    }
     projects[idx] = { ...projects[idx], ...updates, updatedAt: new Date().toISOString() };
     await saveProjects(projects);
+    // Create working folder if it doesn't exist
+    if (projects[idx].workingFolder && !fs.existsSync(projects[idx].workingFolder)) {
+      try { fs.mkdirSync(projects[idx].workingFolder, { recursive: true }); } catch {}
+    }
     return projects[idx];
   });
 
@@ -370,6 +384,52 @@ Generate the project memory document now:`;
     const fileName = path.basename(fullPath);
     reply.header("Content-Disposition", `attachment; filename="${fileName}"`);
     return reply.send(createReadStream(fullPath));
+  });
+
+  // Get tiger.md (project instruction file, like CLAUDE.md)
+  fastify.get("/:id/tiger-md", async (request, reply) => {
+    const projects = await getProjects();
+    const project = projects.find((p) => p.id === (request.params as any).id);
+    if (!project) { reply.code(404); return { error: "Project not found" }; }
+
+    let content = "";
+    if (project.workingFolder) {
+      const resolved = await resolveWorkingFolder(project);
+      const tigerMdPath = path.join(resolved, "tiger.md");
+      try {
+        if (fs.existsSync(tigerMdPath)) {
+          content = fs.readFileSync(tigerMdPath, "utf-8");
+        }
+      } catch (err: any) {
+        console.error(`Failed to read tiger.md for project ${project.id}:`, err.message);
+      }
+    }
+    return { content };
+  });
+
+  // Save tiger.md
+  fastify.put("/:id/tiger-md", async (request, reply) => {
+    const projects = await getProjects();
+    const project = projects.find((p) => p.id === (request.params as any).id);
+    if (!project) { reply.code(404); return { error: "Project not found" }; }
+
+    const content = (request.body as any).content || "";
+    if (project.workingFolder) {
+      const resolved = await resolveWorkingFolder(project);
+      const tigerMdPath = path.join(resolved, "tiger.md");
+      try {
+        if (!fs.existsSync(resolved)) {
+          fs.mkdirSync(resolved, { recursive: true });
+        }
+        fs.writeFileSync(tigerMdPath, content, "utf-8");
+      } catch (err: any) {
+        console.error(`Failed to write tiger.md for project ${project.id}:`, err.message);
+        reply.code(500); return { error: `Failed to write tiger.md: ${err.message}` };
+      }
+    } else {
+      reply.code(400); return { error: "No working folder set — tiger.md requires a working folder" };
+    }
+    return { ok: true };
   });
 
   // Get sandbox-relative path for a project file (for preview/display in output panel)

@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { api, sandboxUrl } from "../utils/api";
+import LocalFilesPage from "./LocalFilesPage";
 import "./PageStyles.css";
 
 interface FileEntry {
@@ -14,6 +15,7 @@ interface FileEntry {
 }
 
 export default function FilesPage() {
+  const [activeTab, setActiveTab] = useState<"sandbox" | "local">("sandbox");
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState("");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -216,8 +218,47 @@ export default function FilesPage() {
     setDragOver(false);
   };
 
+  if (activeTab === "local") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border, #d0d7de)", background: "var(--bg-secondary, #f6f8fa)", flexShrink: 0 }}>
+          <button
+            onClick={() => setActiveTab("sandbox")}
+            style={{ padding: "10px 20px", fontSize: 14, fontWeight: 500, border: "none", background: "transparent", cursor: "pointer", opacity: 0.6, borderBottom: "2px solid transparent" }}
+          >
+            Sandbox
+          </button>
+          <button
+            onClick={() => setActiveTab("local")}
+            style={{ padding: "10px 20px", fontSize: 14, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", borderBottom: "2px solid var(--accent, #4285f4)", color: "var(--accent, #4285f4)" }}
+          >
+            Host Folders
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: "auto" }}>
+          <LocalFilesPage />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="page-split">
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border, #d0d7de)", background: "var(--bg-secondary, #f6f8fa)", flexShrink: 0 }}>
+        <button
+          onClick={() => setActiveTab("sandbox")}
+          style={{ padding: "10px 20px", fontSize: 14, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", borderBottom: "2px solid var(--accent, #4285f4)", color: "var(--accent, #4285f4)" }}
+        >
+          Sandbox
+        </button>
+        <button
+          onClick={() => setActiveTab("local")}
+          style={{ padding: "10px 20px", fontSize: 14, fontWeight: 500, border: "none", background: "transparent", cursor: "pointer", opacity: 0.6, borderBottom: "2px solid transparent" }}
+        >
+          Local Files
+        </button>
+      </div>
+    <div className="page-split" style={{ flex: 1 }}>
       <div
         className="panel"
         onDrop={handleDrop}
@@ -405,6 +446,7 @@ export default function FilesPage() {
           )}
         </div>
       )}
+    </div>
     </div>
   );
 }

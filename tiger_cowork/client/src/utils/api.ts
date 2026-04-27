@@ -133,6 +133,8 @@ export const api = {
   getProjectMemory: (id: string) => request(`/projects/${id}/memory`),
   saveProjectMemory: (id: string, content: string) => request(`/projects/${id}/memory`, { method: "PUT", body: JSON.stringify({ content }) }),
   generateProjectMemory: (id: string) => request(`/projects/${id}/memory/generate`, { method: "POST" }),
+  getProjectTigerMd: (id: string) => request(`/projects/${id}/tiger-md`),
+  saveProjectTigerMd: (id: string, content: string) => request(`/projects/${id}/tiger-md`, { method: "PUT", body: JSON.stringify({ content }) }),
   getProjectFiles: (id: string, path?: string) => request(`/projects/${id}/files?path=${encodeURIComponent(path || "")}`),
   projectMkdir: (id: string, name: string, subPath?: string) => request(`/projects/${id}/files/mkdir`, { method: "POST", body: JSON.stringify({ name, path: subPath || "" }) }),
   projectDeleteFile: (id: string, filePath: string) => request(`/projects/${id}/files?path=${encodeURIComponent(filePath)}`, { method: "DELETE" }),
@@ -198,4 +200,54 @@ export const api = {
   generateAgentDefinition: (description: string) => request("/agents/generate-definition", { method: "POST", body: JSON.stringify({ description }) }),
   generateAgentSystem: (description: string, architectureType?: string, agentCount?: string) =>
     request("/agents/generate-system", { method: "POST", body: JSON.stringify({ description, architectureType, agentCount }) }),
+
+  // Local Files
+  getLocalMounts: () => request("/local-files"),
+  browseLocalFiles: (mountId: string, path?: string) => request(`/local-files/browse?mountId=${encodeURIComponent(mountId)}&path=${encodeURIComponent(path || "")}`),
+  readLocalFile: (mountId: string, path: string) => request(`/local-files/read?mountId=${encodeURIComponent(mountId)}&path=${encodeURIComponent(path)}`),
+  writeLocalFile: (mountId: string, path: string, content: string) => request("/local-files/write", { method: "POST", body: JSON.stringify({ mountId, path, content }) }),
+  deleteLocalFile: (mountId: string, path: string) => request(`/local-files?mountId=${encodeURIComponent(mountId)}&path=${encodeURIComponent(path)}`, { method: "DELETE" }),
+  localMkdir: (mountId: string, path: string) => request("/local-files/mkdir", { method: "POST", body: JSON.stringify({ mountId, path }) }),
+  localDownloadUrl: (mountId: string, filePath: string) => {
+    const token = getAccessToken();
+    return `/api/local-files/download?mountId=${encodeURIComponent(mountId)}&path=${encodeURIComponent(filePath)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  },
+  uploadLocalFile: async (mountId: string, file: File, destPath: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mountId", mountId);
+    form.append("path", destPath);
+    const token = getAccessToken();
+    const res = await fetch(`${BASE}/local-files/upload`, {
+      method: "POST",
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return res.json();
+  },
+  validateLocalPath: (path: string) => request("/local-files/validate-path", { method: "POST", body: JSON.stringify({ path }) }),
+  detectSharedFolders: () => request("/local-files/detect-shares"),
+
+  // Skill View/Download
+  skillContent: (id: string) => request(`/skills/${id}/content`),
+  skillDownloadUrl: (id: string) => {
+    const token = getAccessToken();
+    return `/api/skills/${id}/download${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  },
+
+  // Skill Auto-Generation
+  skillAutoRunNow: () => request("/skills/auto/run-now", { method: "POST" }),
+  skillAutoStatus: () => request("/skills/auto/status"),
+  skillApprove: (id: string) => request(`/skills/${id}/approve`, { method: "POST" }),
+  skillReject: (id: string) => request(`/skills/${id}/reject`, { method: "POST" }),
+  skillProposedDiff: (id: string) => request(`/skills/${id}/proposed-diff`),
+
+  // Skill Feedback from Chat
+  skillFeedback: (sessionId: string, data: { skillCandidate?: boolean; skillFeedback?: string }) =>
+    request("/skills/feedback", { method: "POST", body: JSON.stringify({ sessionId, ...data }) }),
+  skillFeedbackStatus: (sessionId: string) => request(`/skills/feedback/${sessionId}`),
+
+  // Per-message feedback
+  saveMessageFeedback: (sessionId: string, index: number, payload: { rating?: "up" | "down" | null; comment?: string; clear?: boolean }) =>
+    request(`/chat/sessions/${sessionId}/messages/${index}/feedback`, { method: "POST", body: JSON.stringify(payload) }),
 };

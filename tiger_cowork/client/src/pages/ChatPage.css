@@ -1511,3 +1511,113 @@
 .proto-queue { background: #34a853; color: #fff; }
 .proto-udp { background: #ea4335; color: #fff; }
 .proto-bus { background: #f59e0b; color: #000; }
+
+/* ─── Message feedback (thumb up/down + comment) ─── */
+.feedback-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border, #d0d7de);
+  background: transparent;
+  color: var(--text-secondary, #57606a);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+  user-select: none;
+}
+
+.feedback-btn:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+  border-color: var(--text-secondary, #8c959f);
+}
+
+.feedback-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.feedback-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.feedback-btn.up.active {
+  background: #16a34a;
+  border-color: #15803d;
+  color: #ffffff;
+  box-shadow: 0 0 0 1px #15803d inset;
+}
+
+.feedback-btn.down.active {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #ffffff;
+  box-shadow: 0 0 0 1px #b91c1c inset;
+}
+
+.feedback-btn.comment.active {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+  box-shadow: 0 0 0 1px #1d4ed8 inset;
+}
+
+.feedback-btn .check-mark {
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.feedback-saved {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.feedback-saved-comment {
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: var(--bg-secondary, #f6f8fa);
+  border-left: 3px solid #2563eb;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #57606a);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.feedback-editor {
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  background: var(--bg-secondary, #fafafa);
+}
+
+.feedback-editor textarea {
+  width: 100%;
+  min-height: 60px;
+  font-size: 13px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 4px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.feedback-editor-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}

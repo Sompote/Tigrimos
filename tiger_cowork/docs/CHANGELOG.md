@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.0 (2026-04-27)
+**Host Folders, Per-Message Feedback, VM Shared Folder Auto-Detection**
+
+- **Host Folders in Files page** — browse and edit files on your host machine via VM shared folders. New "Host Folders" tab in Files page replaces the separate Local Files sidebar item
+- **VM shared folder auto-detection** — parses `/proc/mounts` for 9p, virtiofs, vboxsf, and VMware FUSE mounts; uses the mount tag (UTM share name) as label; host-origin folders tagged with green "Host" badge
+- **Per-message feedback** — thumbs up/down and comment buttons on each assistant message in chat, feeding into the skill auto-update synthesizer
+- **Agent host folder awareness** — enabled host folder mounts with paths and permissions injected into the AI agent's system prompt
+- **Cross-browser local file access** — rewrote from Chrome-only File System Access API to server-side API, working in all browsers
+- **About section in Settings** — shows version, build number, and copyright
+
 ## v1.3.1 (2026-04-18)
 **Fix Custom Skill Python Execution, Output Panel Stability, VM Settings Persistence**
 

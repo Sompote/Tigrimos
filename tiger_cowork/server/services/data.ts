@@ -19,12 +19,21 @@ async function writeJSON(file: string, data: any): Promise<void> {
 }
 
 // Chat history
+export interface ChatMessageFeedback {
+  rating?: "up" | "down";
+  comment?: string;
+  submittedAt?: string;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
-  messages: Array<{ role: string; content: string; timestamp: string; files?: string[] }>;
+  messages: Array<{ role: string; content: string; timestamp: string; files?: string[]; feedback?: ChatMessageFeedback }>;
   createdAt: string;
   updatedAt: string;
+  skillCandidate?: boolean;
+  skillFeedback?: "positive" | "negative";
+  projectId?: string;
 }
 
 export async function getChatHistory(): Promise<ChatSession[]> {
@@ -79,6 +88,14 @@ export interface Settings {
   remoteTaskMaxRetries?: number; // max re-delegations on subAgentTimeout for realtime remote tasks (default 2 → up to 3 total attempts)
   remoteInstances?: Array<{ id: string; name: string; url: string; token: string }>;
   remoteToken?: string;  // this machine's token for incoming remote connections (separate from accessToken)
+  localFileMounts?: Array<{
+    id: string;
+    path: string;           // absolute path on host machine
+    label: string;          // display name
+    permissions: "read" | "readwrite";  // what the agent can do
+    enabled: boolean;
+  }>;
+  skillAutoUpdateHumanFeedbackEnabled?: boolean; // when on, chat UI shows thumb up/down + comment per assistant message; feedback is fed into the synthesiser prompt
   [key: string]: any;
 }
 
@@ -111,6 +128,7 @@ export interface Project {
   workingFolder: string;
   memory: string;
   skills: string[];
+  systemPrompt?: string; // Custom system prompt prepended to AI context for this project
   // Per-project agent overrides (if set, override system settings)
   agentOverride?: {
     enabled?: boolean;
@@ -167,10 +185,20 @@ export interface Skill {
   id: string;
   name: string;
   description: string;
-  source: "claude" | "openclaw" | "custom" | "clawhub";
+  source: "claude" | "openclaw" | "custom" | "clawhub" | "auto";
   script: string;
   enabled: boolean;
   installedAt: string;
+  // Auto-generated skills only:
+  reviewStatus?: "pending" | "approved" | "rejected";
+  autoMeta?: {
+    kind: "create" | "update";
+    basedOn: string[];     // chat session IDs
+    generatedAt: string;
+    model: string;
+    proposedPath?: string; // SKILL.md.proposed for updates pending approval
+    rationale?: string;
+  };
 }
 
 export async function getSkills(): Promise<Skill[]> {

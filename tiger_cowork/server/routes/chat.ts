@@ -108,6 +108,39 @@ export async function chatRoutes(fastify: FastifyInstance) {
     return session;
   });
 
+  // Save thumb up/down + optional comment on a single message (by index)
+  fastify.post("/sessions/:id/messages/:index/feedback", async (request, reply) => {
+    const sessionId = (request.params as any).id;
+    const index = parseInt((request.params as any).index, 10);
+    const sessions = await getChatHistory();
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) { reply.code(404); return { ok: false, error: "Session not found" }; }
+    if (!Number.isFinite(index) || index < 0 || index >= session.messages.length) {
+      reply.code(400); return { ok: false, error: "Invalid message index" };
+    }
+    const body = (request.body as any) || {};
+    const rating = body.rating === "up" || body.rating === "down" ? body.rating : undefined;
+    const comment = typeof body.comment === "string" ? body.comment.slice(0, 4000) : undefined;
+    if (rating === undefined && comment === undefined && body.clear !== true) {
+      reply.code(400); return { ok: false, error: "Provide rating, comment, or clear=true" };
+    }
+    const msg: any = session.messages[index];
+    if (body.clear === true) {
+      delete msg.feedback;
+    } else {
+      const existing = msg.feedback || {};
+      msg.feedback = {
+        ...existing,
+        ...(rating !== undefined ? { rating } : {}),
+        ...(comment !== undefined ? { comment } : {}),
+        submittedAt: new Date().toISOString(),
+      };
+    }
+    session.updatedAt = new Date().toISOString();
+    await saveChatHistory(sessions);
+    return { ok: true, feedback: msg.feedback || null };
+  });
+
   // Send message (non-streaming fallback)
   fastify.post("/sessions/:id/messages", async (request, reply) => {
     const sessions = await getChatHistory();

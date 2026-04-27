@@ -18,12 +18,19 @@ interface AttachedFile {
   type: string;
 }
 
+interface MessageFeedback {
+  rating?: "up" | "down";
+  comment?: string;
+  submittedAt?: string;
+}
+
 interface Message {
   role: string;
   content: string;
   timestamp: string;
   files?: string[];
   attachments?: AttachedFile[];
+  feedback?: MessageFeedback;
 }
 
 interface Session {
@@ -302,6 +309,17 @@ export default function ChatPage() {
   const [agentEditorFilename, setAgentEditorFilename] = useState<string | undefined>();
   const { connected, sendMessage, onChunk, onResponse, onStatus, socket: socketRef } = useSocket();
 
+  // Skill feedback state
+  const [skillCandidate, setSkillCandidate] = useState(false);
+  const [skillFeedback, setSkillFeedback] = useState<"positive" | "negative" | null>(null);
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+
+  // Per-message feedback state
+  const [humanFeedbackEnabled, setHumanFeedbackEnabled] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState<number | null>(null);
+  const [feedbackDraft, setFeedbackDraft] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState<number | null>(null);
+
   // Collect all output files from messages for the right panel (memoized to avoid re-renders)
   const allOutputFiles = useMemo(() =>
     messages.reduce<{ files: string[]; msgIndex: number }[]>((acc, msg, i) => {
@@ -323,6 +341,10 @@ export default function ChatPage() {
         setSearchParams({}, { replace: true }); // clean URL
       }
     });
+    // Load human feedback setting
+    api.getSettings().then((s: any) => {
+      setHumanFeedbackEnabled(!!s.skillAutoUpdateHumanFeedbackEnabled);
+    }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -336,6 +358,12 @@ export default function ChatPage() {
           setAutoCreatedArch(null);
         }
       });
+      api.skillFeedbackStatus(activeSession).then((res: any) => {
+        if (res.ok) {
+          setSkillCandidate(res.skillCandidate || false);
+          setSkillFeedback(res.skillFeedback || null);
+        }
+      }).catch(() => {});
     }
   }, [activeSession]);
 
@@ -782,6 +810,44 @@ export default function ChatPage() {
     }
   };
 
+  const handleSkillCandidate = async () => {
+    if (!activeSession || feedbackSaving) return;
+    setFeedbackSaving(true);
+    const newValue = !skillCandidate;
+    try {
+      await api.skillFeedback(activeSession, { skillCandidate: newValue });
+      setSkillCandidate(newValue);
+    } catch {}
+    setFeedbackSaving(false);
+  };
+
+  const handleSkillFeedback = async (rating: "positive" | "negative") => {
+    if (!activeSession || feedbackSaving) return;
+    setFeedbackSaving(true);
+    const newValue = skillFeedback === rating ? null : rating;
+    try {
+      await api.skillFeedback(activeSession, { skillFeedback: newValue || undefined });
+      setSkillFeedback(newValue);
+    } catch {}
+    setFeedbackSaving(false);
+  };
+
+  // Per-message feedback
+  const submitFeedback = async (
+    index: number,
+    payload: { rating?: "up" | "down"; comment?: string; clear?: boolean },
+  ) => {
+    if (!activeSession) return;
+    setFeedbackBusy(index);
+    try {
+      const res = await api.saveMessageFeedback(activeSession, index, payload);
+      if (res?.ok) {
+        setMessages((prev) => prev.map((m, i) => (i === index ? { ...m, feedback: res.feedback || undefined } : m)));
+      }
+    } catch {}
+    setFeedbackBusy(null);
+  };
+
   const isImageFile = (name: string) => {
     const ext = name.split(".").pop()?.toLowerCase() || "";
     return ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext);
@@ -863,6 +929,44 @@ export default function ChatPage() {
             </svg>
             <span>Export</span>
           </button>
+          {activeSession && messages.length > 0 && (
+            <div style={{ display: "flex", gap: 4, marginLeft: 8, borderLeft: "1px solid rgba(255,255,255,0.15)", paddingLeft: 8 }}>
+              <button
+                className={`activity-log-toggle ${skillCandidate ? "active" : ""}`}
+                onClick={handleSkillCandidate}
+                disabled={feedbackSaving}
+                title={skillCandidate ? "Unmark as skill candidate" : "Mark this chat as a skill candidate for auto-generation"}
+                style={skillCandidate ? { borderColor: "#8b5cf6", color: "#8b5cf6", background: "rgba(139, 92, 246, 0.15)" } : {}}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={skillCandidate ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+                <span>Skill</span>
+              </button>
+              <button
+                className={`activity-log-toggle ${skillFeedback === "positive" ? "active" : ""}`}
+                onClick={() => handleSkillFeedback("positive")}
+                disabled={feedbackSaving}
+                title="Good chat — useful for skill generation"
+                style={skillFeedback === "positive" ? { borderColor: "#137333", color: "#34a853", background: "rgba(52, 168, 83, 0.15)" } : {}}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                </svg>
+              </button>
+              <button
+                className={`activity-log-toggle ${skillFeedback === "negative" ? "active" : ""}`}
+                onClick={() => handleSkillFeedback("negative")}
+                disabled={feedbackSaving}
+                title="Not useful — skip for skill generation"
+                style={skillFeedback === "negative" ? { borderColor: "#c5221f", color: "#ea4335", background: "rgba(234, 67, 53, 0.15)" } : {}}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                </svg>
+              </button>
+            </div>
+          )}
           {autoCreatedArch && (
             <button
               className="activity-log-toggle active"
@@ -928,7 +1032,7 @@ export default function ChatPage() {
         )}
         {!activeSession && messages.length === 0 ? (
           <div className="chat-empty">
-            <h1>Tiger CoWork</h1>
+            <h1>TigrimOS</h1>
             <p>Start a conversation to get help with coding, run Python, manage files, and more.</p>
             <div className="chat-suggestions">
               {["Write a Python script to generate a PDF report", "Help me analyze a CSV file", "Build a React dashboard with charts", "Create a web scraper"].map((s) => (
@@ -973,6 +1077,62 @@ export default function ChatPage() {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
                       {msg.files.length} output{msg.files.length > 1 ? "s" : ""} — view in panel
                     </div>
+                  )}
+                  {/* Per-message feedback (assistant only, when human feedback enabled) */}
+                  {humanFeedbackEnabled && msg.role === "assistant" && (
+                    <>
+                      <div className="feedback-bar">
+                        <button
+                          className={`feedback-btn up ${msg.feedback?.rating === "up" ? "active" : ""}`}
+                          disabled={feedbackBusy === i}
+                          title="Helpful"
+                          onClick={() => submitFeedback(i, { rating: msg.feedback?.rating === "up" ? undefined : "up" })}
+                        >
+                          {"\u{1F44D}"}{msg.feedback?.rating === "up" && <span className="check-mark">{"\u2713"}</span>}
+                        </button>
+                        <button
+                          className={`feedback-btn down ${msg.feedback?.rating === "down" ? "active" : ""}`}
+                          disabled={feedbackBusy === i}
+                          title="Not helpful"
+                          onClick={() => submitFeedback(i, { rating: msg.feedback?.rating === "down" ? undefined : "down" })}
+                        >
+                          {"\u{1F44E}"}{msg.feedback?.rating === "down" && <span className="check-mark">{"\u2713"}</span>}
+                        </button>
+                        <button
+                          className={`feedback-btn comment ${msg.feedback?.comment ? "active" : ""}`}
+                          disabled={feedbackBusy === i}
+                          title="Add comment"
+                          onClick={() => {
+                            if (feedbackOpen === i) { setFeedbackOpen(null); }
+                            else { setFeedbackOpen(i); setFeedbackDraft(msg.feedback?.comment || ""); }
+                          }}
+                        >
+                          {"\u{1F4AC}"}{msg.feedback?.comment && <span className="check-mark">{"\u2713"}</span>}
+                        </button>
+                        {msg.feedback?.submittedAt && (
+                          <span className="feedback-saved">saved for skill update · {new Date(msg.feedback.submittedAt).toLocaleTimeString()}</span>
+                        )}
+                      </div>
+                      {msg.feedback?.comment && feedbackOpen !== i && (
+                        <div className="feedback-saved-comment">{msg.feedback.comment}</div>
+                      )}
+                      {feedbackOpen === i && (
+                        <div className="feedback-editor">
+                          <textarea
+                            value={feedbackDraft}
+                            onChange={(e) => setFeedbackDraft(e.target.value)}
+                            placeholder="What worked or didn't? This is fed into the skill synthesiser."
+                          />
+                          <div className="feedback-editor-actions">
+                            <button className="btn btn-primary btn-sm" disabled={feedbackBusy === i} onClick={() => { submitFeedback(i, { comment: feedbackDraft }); setFeedbackOpen(null); }}>Save</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setFeedbackOpen(null)}>Cancel</button>
+                            {msg.feedback?.comment && (
+                              <button className="btn btn-ghost btn-sm" disabled={feedbackBusy === i} onClick={() => { submitFeedback(i, { clear: true }); setFeedbackOpen(null); }}>Clear</button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1035,7 +1195,7 @@ export default function ChatPage() {
             <textarea
               ref={textareaRef}
               className="chat-input"
-              placeholder="Message Tiger CoWork..."
+              placeholder="Message TigrimOS..."
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
