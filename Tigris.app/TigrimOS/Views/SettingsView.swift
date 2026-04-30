@@ -6,14 +6,43 @@ struct SettingsView: View {
     @AppStorage("memoryGB") private var memoryGB = 4
     @AppStorage("autoStart") private var autoStart = false
     @AppStorage("vmStoragePath") private var vmStoragePath = ""
+    @AppStorage("sandboxBackend") private var sandboxBackendRaw: String = SandboxBackend.auto.rawValue
     @State private var showResetAlert = false
     @State private var showMoveAlert = false
     @State private var pendingStoragePath = ""
+    @State private var availability: BackendAvailability = .init(containerAvailable: false, containerReason: nil)
 
     var body: some View {
         TabView {
             // General
             Form {
+                Section("Sandbox Backend") {
+                    Picker("Backend", selection: $sandboxBackendRaw) {
+                        ForEach(SandboxBackend.allCases, id: \.rawValue) { option in
+                            Text(option.displayName).tag(option.rawValue)
+                        }
+                    }
+
+                    LabeledContent("Active") {
+                        Text(vmManager.activeBackend == .container
+                             ? "Apple Container (MicroVM, ~\(VMConfig.containerMemoryGB) GB)"
+                             : "Apple Virtualization VM (\(VMConfig.memoryGB) GB)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if !availability.containerAvailable, let reason = availability.containerReason {
+                        Label(reason, systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+
+                    Text("Apple Container uses ~1 GB instead of 4 GB. Requires macOS 26 + Apple Silicon and the `container` CLI from https://github.com/apple/container.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .task { availability = BackendSelector.detect() }
+
                 Section("VM Resources") {
                     Picker("CPU Cores", selection: $cpuCount) {
                         ForEach(1...ProcessInfo.processInfo.processorCount, id: \.self) { count in
@@ -101,24 +130,8 @@ struct SettingsView: View {
                     }
 
                     Button("Terminal") {
-                        if let ip = vmManager.vmIPAddress {
-                            let script = """
-                            tell application "Terminal"
-                                do script "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tigris@\(ip)"
-                                activate
-                            end tell
-                            """
-                            let task = Process()
-                            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                            task.arguments = ["-e", script]
-                            try? task.run()
-                        } else {
-                            let alert = NSAlert()
-                            alert.messageText = "VM not running"
-                            alert.informativeText = "Start the VM first to open a terminal session."
-                            alert.alertStyle = .warning
-                            alert.runModal()
-                        }
+                        SandboxTerminalLauncher.launch(activeBackend: vmManager.activeBackend,
+                                                      vmIPAddress: vmManager.vmIPAddress)
                     }
                 }
             }

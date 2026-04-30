@@ -116,9 +116,17 @@ case "$BUILD_TARGET" in
     silicon|m|arm)
         build_app "arm64" "_m" "Apple Silicon" "-silicon"
         ;;
+    tahoe|t)
+        # Same arm64 binary as `silicon`, distributed as TigrimOS_Tahoe.app for the
+        # macOS 26 (Tahoe) Apple Silicon variant that prefers the Apple Container backend.
+        # Source code is shared; the container path only auto-activates on macOS 26+ with
+        # the `container` CLI installed. On older macOS the binary falls back to the VM.
+        build_app "arm64" "_Tahoe" "Apple Silicon (macOS 26 Tahoe)" "-tahoe"
+        ;;
     all)
         build_app "x86_64" "_i" "Intel" "-intel"
         build_app "arm64" "_m" "Apple Silicon" "-silicon"
+        build_app "arm64" "_Tahoe" "Apple Silicon (macOS 26 Tahoe)" "-tahoe"
         ;;
     native)
         ARCH=$(uname -m)
@@ -129,10 +137,11 @@ case "$BUILD_TARGET" in
         fi
         ;;
     *)
-        echo "Usage: $0 [intel|silicon|all|native]"
+        echo "Usage: $0 [intel|silicon|tahoe|all|native]"
         echo "  intel   - Build TigrimOS_i.app (Intel x86_64)"
         echo "  silicon - Build TigrimOS_m.app (Apple Silicon arm64)"
-        echo "  all     - Build both"
+        echo "  tahoe   - Build TigrimOS_Tahoe.app (Apple Silicon, macOS 26 Tahoe + Apple Container)"
+        echo "  all     - Build all three"
         echo "  native  - Build for current Mac (default)"
         exit 1
         ;;
@@ -144,5 +153,6 @@ ls -la "$DIST_DIR"/*.app/Contents/MacOS/* 2>/dev/null | while read line; do
     echo "  $line"
 done
 echo ""
-echo "To run: open $DIST_DIR/TigrimOS_i.app  (Intel)"
-echo "    or: open $DIST_DIR/TigrimOS_m.app  (Apple Silicon)"
+echo "To run: open $DIST_DIR/TigrimOS_i.app      (Intel)"
+echo "    or: open $DIST_DIR/TigrimOS_m.app      (Apple Silicon)"
+echo "    or: open $DIST_DIR/TigrimOS_Tahoe.app  (Apple Silicon, macOS 26 Tahoe + Apple Container)"

@@ -23,6 +23,9 @@ class VMManager: NSObject, ObservableObject {
     @Published var sharedFolders: [SharedFolderEntry] = []
     @Published var serviceReady: Bool = false
 
+    /// Which backend is actually running this launch (resolved from VMConfig.preferredBackend at start time).
+    @Published var activeBackend: ActiveBackend = .vm
+
     private var virtualMachine: VZVirtualMachine?
     private var vmDelegate: VMDelegate?
     private var healthCheckTimer: Timer?
@@ -30,6 +33,7 @@ class VMManager: NSObject, ObservableObject {
     @Published var vmIPAddress: String?
     private var retryCount = 0
     private let maxRetries = 1
+    private var containerRuntime: ContainerRuntime?
 
     // MARK: - Lifecycle
 
@@ -37,6 +41,62 @@ class VMManager: NSObject, ObservableObject {
         guard state == .stopped || state == .error else { return }
         retryCount = 0
 
+        // Resolve which backend to use this launch.
+        let resolution = BackendSelector.resolve(VMConfig.preferredBackend)
+        activeBackend = resolution.backend
+        if resolution.fellBack, let reason = resolution.reason {
+            appendConsole("[WARN] Falling back to VM backend: \(reason)")
+        }
+
+        switch activeBackend {
+        case .container:
+            await startContainerBackend()
+        case .vm:
+            await startVMBackend()
+        }
+    }
+
+    /// Start TigrimOS via Apple's `container` CLI (lightweight MicroVM).
+    private func startContainerBackend() async {
+        do {
+            let runtime = ContainerRuntime()
+            runtime.manager = self
+            containerRuntime = runtime
+
+            appendConsole("[TigrimOS] Backend: Apple container (lightweight MicroVM)")
+            try VMConfig.ensureDirectories()
+
+            state = .starting
+            try await runtime.ensureSystemReady()
+
+            guard let buildContext = findTigerCoworkSource() else {
+                throw TigrimOSError.provisioningFailed(
+                    "Could not find tiger_cowork/ next to TigrimOS.app — required as the container build context"
+                )
+            }
+
+            state = .downloading
+            try await runtime.ensureImageBuilt(buildContext: buildContext)
+
+            state = .starting
+            try await runtime.startContainer(sharedFolders: sharedFolders)
+            runtime.startStreamingLogs()
+
+            // Port is published to 127.0.0.1 — the existing health check & WebView code work unchanged.
+            vmIPAddress = "127.0.0.1"
+            state = .running
+            appendConsole("[TigrimOS] Container started — waiting for service on http://127.0.0.1:\(VMConfig.vmPort)")
+
+            startHealthCheck()
+        } catch {
+            state = .error
+            errorMessage = error.localizedDescription
+            appendConsole("[ERROR] \(error.localizedDescription)")
+        }
+    }
+
+    /// Start TigrimOS in a full Ubuntu VM via Apple Virtualization.framework. (The original code path.)
+    private func startVMBackend() async {
         do {
             try VMConfig.ensureDirectories()
 
@@ -105,6 +165,27 @@ class VMManager: NSObject, ObservableObject {
         healthCheckTimer = nil
         serviceReady = false
 
+        switch activeBackend {
+        case .container:
+            await stopContainerBackend()
+        case .vm:
+            await stopVMBackend()
+        }
+    }
+
+    private func stopContainerBackend() async {
+        do {
+            try await containerRuntime?.stopContainer()
+        } catch {
+            appendConsole("[WARN] Container stop: \(error.localizedDescription)")
+        }
+        containerRuntime = nil
+        vmIPAddress = nil
+        state = .stopped
+        appendConsole("[TigrimOS] Container stopped")
+    }
+
+    private func stopVMBackend() async {
         do {
             if let vm = virtualMachine, vm.canRequestStop {
                 try vm.requestStop()
@@ -127,6 +208,30 @@ class VMManager: NSObject, ObservableObject {
     }
 
     func resetVM() async {
+        // Reset whichever backend is currently selected (matches what the next start would use).
+        let resolution = BackendSelector.resolve(VMConfig.preferredBackend)
+        switch resolution.backend {
+        case .container:
+            await resetContainerBackend()
+        case .vm:
+            await resetVMBackend()
+        }
+    }
+
+    private func resetContainerBackend() async {
+        await stopVM()
+        do {
+            // Recreate a runtime if we don't have one — needed when reset is invoked from a fresh launch.
+            let runtime = containerRuntime ?? ContainerRuntime()
+            runtime.manager = self
+            try await runtime.resetContainer()
+        } catch {
+            appendConsole("[WARN] Container reset: \(error.localizedDescription)")
+        }
+        containerRuntime = nil
+    }
+
+    private func resetVMBackend() async {
         await stopVM()
         // Remove everything so it re-provisions on next start
         for url in [VMConfig.provisionedMarker, VMConfig.rawDiskPath, VMConfig.seedISOPath,
@@ -1174,11 +1279,7 @@ struct SharedFolderEntry: Identifiable {
     let name: String
 }
 
-struct ProcessResult {
-    let exitCode: Int32
-    let stdout: String
-    let stderr: String
-}
+// ProcessResult is defined in Sandbox/CommandRunner.swift and shared by both backends.
 
 // MARK: - Errors
 
