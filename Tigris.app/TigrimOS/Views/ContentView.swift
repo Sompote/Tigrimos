@@ -58,37 +58,21 @@ struct ContentView: View {
                             .scaleEffect(0.7)
                     }
 
-                    // Terminal — SSH into VM
+                    // Terminal — opens a shell inside the active backend (container exec or SSH)
                     Button {
-                        if let ip = vmManager.vmIPAddress {
-                            let script = """
-                            tell application "Terminal"
-                                do script "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tigris@\(ip)"
-                                activate
-                            end tell
-                            """
-                            let task = Process()
-                            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-                            task.arguments = ["-e", script]
-                            try? task.run()
-                        } else {
-                            let alert = NSAlert()
-                            alert.messageText = "VM not running"
-                            alert.informativeText = "Start the VM first to open a terminal session."
-                            alert.alertStyle = .warning
-                            alert.runModal()
-                        }
+                        SandboxTerminalLauncher.launch(activeBackend: vmManager.activeBackend,
+                                                      vmIPAddress: vmManager.vmIPAddress)
                     } label: {
                         Label("Terminal", systemImage: "terminal")
                     }
                     .buttonStyle(.bordered)
                     .disabled(vmManager.state != .running)
 
-                    // Reset VM button
+                    // Reset sandbox — wipes whichever backend is currently selected
                     Button {
                         showResetAlert = true
                     } label: {
-                        Label("Reset VM", systemImage: "arrow.counterclockwise")
+                        Label("Reset Sandbox", systemImage: "arrow.counterclockwise")
                     }
                     .buttonStyle(.bordered)
                     .foregroundColor(.orange)

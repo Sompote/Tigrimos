@@ -62,6 +62,7 @@ Download from the [latest release](https://github.com/Sompote/Tigrimos/releases/
 |----------|----------|--------------------|
 | macOS — Apple Silicon (M1/M2/M3/M4) | [**TigrimOS-v1.4.0-macOS-AppleSilicon.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.4.0/TigrimOS-v1.4.0-macOS-AppleSilicon.zip) | Apple Virtualization.framework |
 | macOS — Apple Silicon (macOS 26 Tahoe) | [**TigrimOS-v1.4.0-macOS-Tahoe-AppleSilicon.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.4.0/TigrimOS-v1.4.0-macOS-Tahoe-AppleSilicon.zip) | Apple Virtualization.framework |
+| macOS — Apple Silicon (macOS 26 Tahoe, Apple Container) | [**TigrimOS-v1.4.0-macOS-Tahoe-AppleSilicon-AppleContainer.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.4.0/TigrimOS-v1.4.0-macOS-Tahoe-AppleSilicon-AppleContainer.zip) | Apple [`container`](https://github.com/apple/container) MicroVM (~1 GB), VM fallback |
 | macOS — Intel | [**TigrimOS-v1.4.0-macOS-Intel.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.4.0/TigrimOS-v1.4.0-macOS-Intel.zip) | Apple Virtualization.framework |
 | Windows 10/11 | [**TigrimOS-v1.4.0-Windows.zip**](https://github.com/Sompote/Tigrimos/releases/download/v1.4.0/TigrimOS-v1.4.0-Windows.zip) | WSL2 (Windows Subsystem for Linux) |
 

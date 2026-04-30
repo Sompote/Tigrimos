@@ -1,5 +1,5 @@
 # Stage 1: Build client
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -18,15 +18,21 @@ COPY . .
 RUN cd client && npx vite build
 
 # Stage 2: Production
-FROM node:20-alpine
+# Debian-slim (glibc) instead of alpine (musl) — PyPI ships prebuilt wheels for
+# numpy/scipy/matplotlib/pandas on glibc for both x86_64 and arm64, so pip
+# install completes in seconds without needing a C toolchain in the image.
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# Install Python3 and required system libraries
-RUN apk add --no-cache python3 py3-pip py3-numpy py3-pillow \
+# Python 3 + venv + scientific stack from PyPI wheels (no source builds needed).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir \
-       matplotlib pandas openpyxl python-docx scipy seaborn
+       numpy pillow matplotlib pandas openpyxl python-docx scipy seaborn
 
 ENV PATH="/opt/venv/bin:$PATH"
 

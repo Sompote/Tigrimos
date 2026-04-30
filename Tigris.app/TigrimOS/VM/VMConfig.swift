@@ -89,4 +89,23 @@ struct VMConfig {
         try FileManager.default.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: defaultSharedDir, withIntermediateDirectories: true)
     }
+
+    // MARK: - Sandbox Backend
+
+    /// User's preferred sandbox backend. Defaults to .auto on first launch.
+    static var preferredBackend: SandboxBackend {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: "sandboxBackend"),
+                  let backend = SandboxBackend(rawValue: raw) else {
+                return .auto
+            }
+            return backend
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "sandboxBackend") }
+    }
+
+    /// Resource limits passed to `container run --memory/--cpus` when the container backend is active.
+    /// The container's MicroVM right-sizes to these limits, so 1GB/2 CPUs uses far less than the VM's 4GB.
+    static let containerMemoryGB: Int = 1
+    static let containerCPUs: Int = 2
 }

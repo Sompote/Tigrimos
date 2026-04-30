@@ -5,6 +5,7 @@ struct SetupView: View {
     @EnvironmentObject var vmManager: VMManager
     @State private var step = 0
     @State private var agreedToSecurity = false
+    @State private var availability: BackendAvailability = .init(containerAvailable: false, containerReason: nil)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,14 +99,19 @@ struct SetupView: View {
                 .multilineTextAlignment(.center)
 
             VStack(alignment: .leading, spacing: 12) {
-                featureRow(icon: "shield.checkered", text: "Full VM isolation via Apple Virtualization")
+                featureRow(icon: "shield.checkered", text: "Full sandbox isolation via Apple Virtualization")
                 featureRow(icon: "lock.fill", text: "Host files only accessible with your permission")
                 featureRow(icon: "bolt.fill", text: "Native performance on Apple Silicon")
-                featureRow(icon: "arrow.down.circle", text: "~2GB download for Ubuntu base image")
+                if availability.containerAvailable {
+                    featureRow(icon: "shippingbox", text: "Apple Container backend — ~1 GB lightweight MicroVM")
+                } else {
+                    featureRow(icon: "arrow.down.circle", text: "~700 MB download for Ubuntu base image")
+                }
             }
             .padding(.top, 10)
         }
         .padding(.horizontal, 40)
+        .task { availability = BackendSelector.detect() }
     }
 
     private var securityStep: some View {
